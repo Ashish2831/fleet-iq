@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fleetiq
+      POSTGRES_PASSWORD: fleetiq
+      POSTGRES_DB: fleetiq
+    ports:
+      - "5434:5432"
+    volumes:
+      - fleetiq_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fleetiq"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  fleetiq_pgdata:
