@@ -23,8 +23,13 @@ from apps.api.rest.serializers import (
     VehicleSerializer,
     WarehouseSerializer,
 )
+from datetime import timedelta
+
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+
 from apps.catalog.models import Address, Customer, Warehouse
-from apps.common.errors import NotFound, Unauthorized
+from apps.common.errors import BadRequest, NotFound, Unauthorized
 from apps.common.queries import delayed_shipments
 from apps.fleet.models import Driver, Vehicle
 from apps.identity.models import Tenant, User
@@ -34,6 +39,7 @@ from apps.routing.models import Route
 from apps.routing.services import assign_route
 from apps.shipments.models import Delivery, Shipment
 from apps.shipments.services import complete_delivery
+from apps.telemetry.queries import vehicle_track
 
 
 def _set_refresh_cookie(response, token: str):
@@ -56,7 +62,7 @@ class LoginThrottle(AnonRateThrottle):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health(_request):
-    return Response({"status": "ok", "phase": "D"})
+    return Response({"status": "ok", "phase": "E"})
 
 
 @api_view(["GET"])
@@ -135,6 +141,41 @@ class VehicleViewSet(TenantViewSet):
     queryset = Vehicle.objects.select_related("vehicle_type").filter(deleted_at__isnull=True)
     serializer_class = VehicleSerializer
     filterset_fields = ("status",)
+
+    @action(detail=True, methods=["get"])
+    def track(self, request, pk=None):
+        vehicle = self.get_object()
+        now = timezone.now()
+        start = parse_datetime(request.query_params.get("from") or "") or (now - timedelta(minutes=15))
+        end = parse_datetime(request.query_params.get("to") or "") or now
+        if start.tzinfo is None:
+            start = timezone.make_aware(start)
+        if end.tzinfo is None:
+            end = timezone.make_aware(end)
+        source = request.query_params.get("source") or "raw"
+        points = vehicle_track(
+            tenant_id=request.user.tenant_id,
+            vehicle_id=vehicle.id,
+            start=start,
+            end=end,
+            source=source,
+        )
+        return Response(
+            {
+                "vehicle_id": str(vehicle.id),
+                "source": source,
+                "points": [
+                    {
+                        "recorded_at": p["recorded_at"].isoformat(),
+                        "lat": p["lat"],
+                        "lng": p["lng"],
+                        "speed_kmh": p["speed_kmh"],
+                        "heading": p.get("heading"),
+                    }
+                    for p in points
+                ],
+            }
+        )
 
 
 class WarehouseViewSet(TenantViewSet):

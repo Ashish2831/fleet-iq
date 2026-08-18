@@ -30,3 +30,8 @@ class Unauthorized(ApiError):
 class Unavailable(ApiError):
     def __init__(self, detail="Service unavailable"):
         super().__init__("Unavailable", status=503, code="UNAVAILABLE", detail=detail)
+
+
+class BadRequest(ApiError):
+    def __init__(self, detail="Bad request"):
+        super().__init__("Bad Request", status=400, code="BAD_REQUEST", detail=detail)

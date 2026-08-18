@@ -98,14 +98,57 @@ export default function LiveMapPage() {
       el.className = "live-pin";
       el.title = v.plate || v.id;
       marker = new maplibregl.Marker({ element: el }).setLngLat([v.lng, v.lat]).addTo(map);
-      el.addEventListener("click", () => select(v));
+      el.addEventListener("click", () => {
+        select(v);
+        void loadTrail(v.id);
+      });
       markers.current.set(v.id, marker);
     } else {
       marker.setLngLat([v.lng, v.lat]);
     }
     const el = marker.getElement();
     el.style.background = COLORS[v.status || "active"] || COLORS.active;
-    el.onclick = () => select(v);
+    el.onclick = () => {
+      select(v);
+      void loadTrail(v.id);
+    };
+  }
+
+  async function loadTrail(vehicleId: string) {
+    const map = mapRef.current;
+    if (!map) return;
+    const from = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const to = new Date().toISOString();
+    try {
+      const data = await rest<{ points: { lat: number; lng: number }[] }>(
+        `/api/v1/vehicles/${vehicleId}/track/?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+      );
+      const coords = (data.points || [])
+        .filter((p) => p.lat != null && p.lng != null)
+        .map((p) => [p.lng, p.lat] as [number, number]);
+      const geo = {
+        type: "Feature" as const,
+        geometry: { type: "LineString" as const, coordinates: coords },
+        properties: {},
+      };
+      const apply = () => {
+        if (map.getSource("trail")) {
+          (map.getSource("trail") as maplibregl.GeoJSONSource).setData(geo as any);
+        } else {
+          map.addSource("trail", { type: "geojson", data: geo as any });
+          map.addLayer({
+            id: "trail-line",
+            type: "line",
+            source: "trail",
+            paint: { "line-color": "#c8f54a", "line-width": 3, "line-opacity": 0.85 },
+          });
+        }
+      };
+      if (map.isStyleLoaded()) apply();
+      else map.once("load", apply);
+    } catch {
+      /* history is optional; live pin still works */
+    }
   }
 
   async function pingGps() {

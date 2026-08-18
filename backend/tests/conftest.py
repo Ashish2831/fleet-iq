@@ -4,9 +4,14 @@ import pytest
 @pytest.fixture(autouse=True)
 def _phase_c_backends(settings):
     settings.CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+    settings.REST_FRAMEWORK = {
+        **settings.REST_FRAMEWORK,
+        "DEFAULT_THROTTLE_CLASSES": [],
+        "DEFAULT_THROTTLE_RATES": {"anon": "10000/min", "user": "10000/min", "gps": "10000/min"},
+    }
     settings.CACHES = {
         "default": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "BACKEND": "django.core.cache.backends.dummy.DummyCache",
             "LOCATION": "fleetiq-tests",
         }
     }
@@ -38,3 +43,13 @@ def memory_bus(settings):
     bus = reset_bus()
     yield bus
     reset_bus()
+
+
+@pytest.fixture(autouse=True)
+def memory_telemetry(settings):
+    settings.MONGO_ENABLED = False
+    from apps.telemetry.store import reset_store
+
+    store = reset_store()
+    yield store
+    reset_store()

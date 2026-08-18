@@ -91,7 +91,12 @@ def handle_dispatch(env: dict) -> None:
 
 
 def handle_location(env: dict) -> None:
-    logger.debug("location %s %s", env.get("aggregate_id"), env.get("payload"))
+    from apps.telemetry.ingest import TelemetryPoison, ingest_location_event
+
+    try:
+        ingest_location_event(env)
+    except TelemetryPoison as exc:
+        raise PoisonMessage(str(exc)) from exc
 
 
 HANDLERS = {
@@ -116,34 +121,40 @@ def consume_once(group: str, *, bus: EventBus | None = None, max_records: int = 
     use_inbox = group in INBOX_CONSUMERS
     records = bus.poll(group, topics, max_records=max_records)
     ok = skipped = dlq = 0
-    for record in records:
-        try:
-            env = _parse(record)
-        except PoisonMessage as exc:
-            send_dlq(bus, record, str(exc), group)
-            dlq += 1
-            continue
-        event_id = str(env["event_id"])
-        if use_inbox and already_processed(group, event_id):
-            skipped += 1
-            continue
-        retries = 0
-        while True:
+    try:
+        for record in records:
             try:
-                handler(env)
-                if use_inbox:
-                    mark_processed(group, event_id)
-                ok += 1
-                break
+                env = _parse(record)
             except PoisonMessage as exc:
                 send_dlq(bus, record, str(exc), group)
                 dlq += 1
-                break
-            except Exception as exc:
-                retries += 1
-                logger.exception("handler %s failed event=%s try=%s", group, event_id, retries)
-                if retries >= 3:
+                continue
+            event_id = str(env["event_id"])
+            if use_inbox and already_processed(group, event_id):
+                skipped += 1
+                continue
+            retries = 0
+            while True:
+                try:
+                    handler(env)
+                    if use_inbox:
+                        mark_processed(group, event_id)
+                    ok += 1
+                    break
+                except PoisonMessage as exc:
                     send_dlq(bus, record, str(exc), group)
                     dlq += 1
                     break
+                except Exception as exc:
+                    retries += 1
+                    logger.exception("handler %s failed event=%s try=%s", group, event_id, retries)
+                    if retries >= 3:
+                        send_dlq(bus, record, str(exc), group)
+                        dlq += 1
+                        break
+    finally:
+        if group == "fleetiq-location":
+            from apps.telemetry.store import get_store
+
+            get_store().flush()
     return {"ok": ok, "skipped": skipped, "dlq": dlq, "polled": len(records)}

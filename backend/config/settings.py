@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "apps.billing",
     "apps.tracking",
     "apps.events",
+    "apps.telemetry",
     "apps.api",
 ]
 
@@ -115,3 +116,10 @@ CHANNEL_LAYERS = {
 KAFKA_ENABLED = os.environ.get("KAFKA_ENABLED", "false").lower() == "true"
 KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:19092")
 KAFKA_CLIENT_ID = os.environ.get("KAFKA_CLIENT_ID", "fleetiq")
+
+MONGO_ENABLED = os.environ.get("MONGO_ENABLED", "false").lower() == "true"
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://127.0.0.1:27018")
+MONGO_DB = os.environ.get("MONGO_DB", "fleetiq")
+MONGO_RAW_TTL_SECONDS = int(os.environ.get("MONGO_RAW_TTL_SECONDS", "604800"))
+MONGO_MINUTE_TTL_SECONDS = int(os.environ.get("MONGO_MINUTE_TTL_SECONDS", "7776000"))
+TELEMETRY_BATCH_SIZE = int(os.environ.get("TELEMETRY_BATCH_SIZE", "500"))

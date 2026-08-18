@@ -25,6 +25,8 @@ def produce_location(
     recorded_at,
     battery=None,
     fuel_level=None,
+    driver_id=None,
+    route_id=None,
     bus: EventBus | None = None,
 ) -> bool:
     """Direct produce after Redis HSET. Never writes Postgres outbox.
@@ -45,6 +47,8 @@ def produce_location(
             "recorded_at": recorded_at.isoformat() if hasattr(recorded_at, "isoformat") else str(recorded_at),
             "battery": battery,
             "fuel_level": fuel_level,
+            "driver_id": str(driver_id) if driver_id else None,
+            "route_id": str(route_id) if route_id else None,
         },
         event_id=event_id,
         occurred_at=recorded_at if hasattr(recorded_at, "isoformat") else None,

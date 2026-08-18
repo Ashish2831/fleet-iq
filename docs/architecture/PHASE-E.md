@@ -254,13 +254,13 @@ Do not move `orders` here.
 
 ## 12. Phase E done when
 
-- [ ] Time series collection + dedupe collection exist in docker-compose Mongo
-- [ ] `fleetiq-location` bulk-inserts from Kafka; unique `event_id` skips duplicates
-- [ ] TTL expires raw points (set a 10-minute TTL in a test collection to prove it)
-- [ ] `GET /api/v1/vehicles/{id}/track` and GraphQL `vehicle.track` return breadcrumbs
-- [ ] Map drawer shows last 15 minutes from Mongo; live pin still Redis
-- [ ] 1-minute downsample job runs
-- [ ] Tenant B cannot read tenant A’s track by vehicle UUID
-- [ ] Stopping Mongo does not freeze `/live-map`
+- [x] Time series collection + dedupe collection exist in docker-compose Mongo
+- [x] `fleetiq-location` bulk-inserts from Kafka; unique `event_id` skips duplicates
+- [x] TTL expires raw points (set a 10-minute TTL in a test collection to prove it)
+- [x] `GET /api/v1/vehicles/{id}/track` and GraphQL `vehicle.track` return breadcrumbs
+- [x] Map drawer shows last 15 minutes from Mongo; live pin still Redis
+- [x] 1-minute downsample job runs
+- [x] Tenant B cannot read tenant A’s track by vehicle UUID
+- [x] Stopping Mongo does not freeze `/live-map`
 
 Next: **Phase F** — Elasticsearch for shipment/driver ops search plus the start of SOP hybrid search (BM25 + vectors). Postgres remains truth; ES is a projection + RAG index.

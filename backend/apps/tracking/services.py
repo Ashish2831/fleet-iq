@@ -122,6 +122,8 @@ def ingest_location(*, user, payload: dict) -> dict:
             recorded_at=recorded_at,
             battery=payload.get("battery"),
             fuel_level=payload.get("fuel_level"),
+            driver_id=assignment.driver_id if assignment else None,
+            route_id=route.id if route else None,
         )
         if rs.should_broadcast(tenant, vehicle_id, lat=lat, lng=lng, status=status):
             _broadcast(tenant, vehicle_id, live, status)

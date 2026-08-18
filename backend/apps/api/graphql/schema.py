@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Annotated, Optional
 
 import strawberry
 from asgiref.sync import sync_to_async
@@ -25,6 +25,7 @@ from apps.orders.services import confirm_order
 from apps.routing.models import Route as RouteModel
 from apps.routing.services import assign_route
 from apps.shipments.models import Shipment as ShipmentModel
+from apps.telemetry.queries import vehicle_track
 from apps.tracking.services import live_for_vehicle, snapshot_for_tenant
 
 
@@ -157,6 +158,44 @@ class VehicleGql:
             )
 
         return await sync_to_async(inner)()
+
+    @strawberry.field
+    async def track(
+        self,
+        info: strawberry.Info,
+        from_: Annotated[datetime, strawberry.argument(name="from")],
+        to: datetime,
+        source: str = "raw",
+    ) -> list["TrackPoint"]:
+        _user(info)
+
+        def inner():
+            points = vehicle_track(
+                tenant_id=info.context.tenant.id,
+                vehicle_id=self.id,
+                start=from_,
+                end=to,
+                source=source,
+            )
+            return [
+                TrackPoint(
+                    recorded_at=p["recorded_at"],
+                    lat=p["lat"],
+                    lng=p["lng"],
+                    speed_kmh=p["speed_kmh"],
+                )
+                for p in points
+            ]
+
+        return await sync_to_async(inner)()
+
+
+@strawberry.type
+class TrackPoint:
+    recorded_at: datetime
+    lat: float
+    lng: float
+    speed_kmh: float
 
 
 @strawberry.type
