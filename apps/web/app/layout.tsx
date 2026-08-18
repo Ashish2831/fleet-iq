@@ -14,6 +14,7 @@ const links = [
   ["/vehicles", "Vehicles"],
   ["/live-map", "Live map"],
   ["/routes", "Routes"],
+  ["/search", "Search"],
   ["/dispatch", "Dispatch"],
   ["/analytics", "Analytics"],
   ["/ai-assistant", "AI"],

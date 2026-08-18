@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.api.rest import views
+from apps.search import views as search_views
 from apps.tracking import views as tracking_views
 
 router = DefaultRouter()
@@ -22,5 +23,8 @@ urlpatterns = [
     path("me", views.me),
     path("tracking/locations", tracking_views.ingest),
     path("tracking/vehicles", tracking_views.vehicles_snapshot),
+    path("search/shipments", search_views.search_shipments_view),
+    path("search/drivers", search_views.search_drivers_view),
+    path("search/knowledge", search_views.search_knowledge_view),
     path("", include(router.urls)),
 ]

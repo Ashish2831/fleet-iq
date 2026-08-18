@@ -25,6 +25,7 @@ from apps.orders.services import confirm_order
 from apps.routing.models import Route as RouteModel
 from apps.routing.services import assign_route
 from apps.shipments.models import Shipment as ShipmentModel
+from apps.search.query import search_drivers, search_knowledge, search_shipments
 from apps.telemetry.queries import vehicle_track
 from apps.tracking.services import live_for_vehicle, snapshot_for_tenant
 
@@ -661,7 +662,150 @@ class RoutingQuery:
 
 
 @strawberry.type
-class Query(IdentityQuery, DashboardQuery, FleetQuery, OrderQuery, RoutingQuery):
+class ShipmentSearchHit:
+    shipment_id: strawberry.ID
+    shipment_number: str
+    status: str
+    delayed: bool
+    city: str
+    warehouse_code: str
+    customer_name: str
+    score: float
+
+
+@strawberry.type
+class ShipmentSearchResult:
+    hits: list[ShipmentSearchHit]
+    total: int
+    facets_warehouse: list[str]
+    facets_status: list[str]
+
+
+@strawberry.type
+class DriverSearchHit:
+    driver_id: strawberry.ID
+    full_name: str
+    status: str
+    skills: list[str]
+    rating: Optional[float]
+    score: float
+
+
+@strawberry.type
+class KnowledgeHit:
+    text: str
+    title: str
+    heading: str
+    page: Optional[int]
+    source: str
+    score: float
+
+
+@strawberry.type
+class SearchQuery:
+    @strawberry.field
+    async def search_shipments(
+        self,
+        info: strawberry.Info,
+        q: Optional[str] = None,
+        delayed: Optional[bool] = None,
+        city: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> ShipmentSearchResult:
+        user = _user(info)
+
+        def inner():
+            result = search_shipments(
+                tenant_id=user.tenant_id,
+                q=q or "",
+                delayed=delayed,
+                city=city,
+                status=status,
+            )
+            hits = [
+                ShipmentSearchHit(
+                    shipment_id=h["shipment_id"],
+                    shipment_number=h.get("shipment_number") or "",
+                    status=h.get("status") or "",
+                    delayed=bool(h.get("delayed")),
+                    city=h.get("city") or "",
+                    warehouse_code=h.get("warehouse_code") or "",
+                    customer_name=h.get("customer_name") or "",
+                    score=float(h.get("score") or 0),
+                )
+                for h in result["hits"]
+            ]
+            return ShipmentSearchResult(
+                hits=hits,
+                total=result["total"],
+                facets_warehouse=list((result.get("facets") or {}).get("by_warehouse") or {}),
+                facets_status=list((result.get("facets") or {}).get("by_status") or {}),
+            )
+
+        return await sync_to_async(inner)()
+
+    @strawberry.field
+    async def search_drivers(
+        self,
+        info: strawberry.Info,
+        q: Optional[str] = None,
+        skills: Optional[list[str]] = None,
+        available: Optional[bool] = None,
+        lat: Optional[float] = None,
+        lng: Optional[float] = None,
+        radius_km: Optional[float] = None,
+    ) -> list[DriverSearchHit]:
+        user = _user(info)
+
+        def inner():
+            result = search_drivers(
+                tenant_id=user.tenant_id,
+                q=q or "",
+                skills=skills,
+                available=available,
+                lat=lat,
+                lng=lng,
+                radius_km=radius_km,
+            )
+            return [
+                DriverSearchHit(
+                    driver_id=h["driver_id"],
+                    full_name=h.get("full_name") or "",
+                    status=h.get("status") or "",
+                    skills=list(h.get("skills") or []),
+                    rating=h.get("rating"),
+                    score=float(h.get("score") or 0),
+                )
+                for h in result["hits"]
+            ]
+
+        return await sync_to_async(inner)()
+
+    @strawberry.field
+    async def search_knowledge(
+        self, info: strawberry.Info, q: str, doc_type: Optional[str] = None
+    ) -> list[KnowledgeHit]:
+        user = _user(info)
+
+        def inner():
+            result = search_knowledge(tenant_id=user.tenant_id, q=q, doc_type=doc_type)
+            return [
+                KnowledgeHit(
+                    text=h.get("text") or "",
+                    title=h.get("title") or "",
+                    heading=h.get("heading") or "",
+                    page=h.get("page"),
+                    source=h.get("source") or "",
+                    score=float(h.get("score") or 0),
+                )
+                for h in result["hits"]
+            ]
+
+        return await sync_to_async(inner)()
+
+
+@strawberry.type
+class Query(IdentityQuery, DashboardQuery, FleetQuery, OrderQuery, RoutingQuery, SearchQuery):
     pass
 
 

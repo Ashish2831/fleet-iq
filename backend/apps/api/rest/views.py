@@ -62,7 +62,7 @@ class LoginThrottle(AnonRateThrottle):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health(_request):
-    return Response({"status": "ok", "phase": "E"})
+    return Response({"status": "ok", "phase": "F"})
 
 
 @api_view(["GET"])

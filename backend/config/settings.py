@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "apps.tracking",
     "apps.events",
     "apps.telemetry",
+    "apps.search",
     "apps.api",
 ]
 
@@ -123,3 +124,6 @@ MONGO_DB = os.environ.get("MONGO_DB", "fleetiq")
 MONGO_RAW_TTL_SECONDS = int(os.environ.get("MONGO_RAW_TTL_SECONDS", "604800"))
 MONGO_MINUTE_TTL_SECONDS = int(os.environ.get("MONGO_MINUTE_TTL_SECONDS", "7776000"))
 TELEMETRY_BATCH_SIZE = int(os.environ.get("TELEMETRY_BATCH_SIZE", "500"))
+
+ES_ENABLED = os.environ.get("ES_ENABLED", "false").lower() == "true"
+ES_URL = os.environ.get("ES_URL", "http://127.0.0.1:9201")

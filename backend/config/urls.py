@@ -5,7 +5,7 @@ from apps.api.graphql.views import PublicSchemaView, PublicSwaggerView, graphql_
 
 
 def health(_request):
-    return JsonResponse({"status": "ok", "phase": "E"})
+    return JsonResponse({"status": "ok", "phase": "F"})
 
 
 urlpatterns = [

@@ -76,7 +76,25 @@ services:
       timeout: 5s
       retries: 10
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      xpack.security.http.ssl.enabled: "false"
+      ES_JAVA_OPTS: "-Xms256m -Xmx256m"
+    ports:
+      - "9201:9200"
+    volumes:
+      - fleetiq_es:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200 >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
 volumes:
   fleetiq_pgdata:
   fleetiq_redpanda:
   fleetiq_mongo:
+  fleetiq_es:

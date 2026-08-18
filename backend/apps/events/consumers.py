@@ -90,6 +90,12 @@ def handle_dispatch(env: dict) -> None:
         logger.info("would dispatch order %s", env.get("aggregate_id"))
 
 
+def handle_search(env: dict) -> None:
+    from apps.search.indexer import apply_search_event
+
+    apply_search_event(env)
+
+
 def handle_location(env: dict) -> None:
     from apps.telemetry.ingest import TelemetryPoison, ingest_location_event
 
@@ -104,6 +110,7 @@ HANDLERS = {
     "fleetiq-analytics": handle_analytics,
     "fleetiq-dispatch": handle_dispatch,
     "fleetiq-location": handle_location,
+    "fleetiq-search": handle_search,
 }
 
 GROUP_TOPICS = {
@@ -111,6 +118,7 @@ GROUP_TOPICS = {
     "fleetiq-analytics": [ORDERS, ROUTING, DELIVERIES, FLEET],
     "fleetiq-dispatch": [ORDERS],
     "fleetiq-location": [LOCATION],
+    "fleetiq-search": [ORDERS, ROUTING, DELIVERIES, FLEET],
 }
 
 

@@ -283,13 +283,13 @@ Postgres image for a shipment is canonical. If ES and SQL disagree, **trust SQL*
 
 ## 10. Phase F done when
 
-- [ ] `shipments` and `drivers` indices; Kafka `fleetiq-search` upserts
-- [ ] Query “delayed + Bengaluru + Whitefield” returns seed shipments with warehouse facets
-- [ ] Driver geo + skills filter works from Redis-refreshed `location`
-- [ ] `knowledge` index: 4+ SOP PDFs chunked, embedded, hybrid search with sources
-- [ ] GraphQL `searchShipments` / `searchKnowledge` tenant-filtered
-- [ ] Reindex command rebuilds from Postgres
-- [ ] ES down does not block order create
-- [ ] Tenant B cannot retrieve tenant A knowledge chunks
+- [x] `shipments` and `drivers` indices; Kafka `fleetiq-search` upserts
+- [x] Query “delayed + Bengaluru + Whitefield” returns seed shipments with warehouse facets
+- [x] Driver geo + skills filter works from Redis-refreshed `location`
+- [x] `knowledge` index: 4+ SOP PDFs chunked, embedded, hybrid search with sources
+- [x] GraphQL `searchShipments` / `searchKnowledge` tenant-filtered
+- [x] Reindex command rebuilds from Postgres
+- [x] ES down does not block order create
+- [x] Tenant B cannot retrieve tenant A knowledge chunks
 
 Next: **Phase G** — dispatch as a **deterministic** scorer / OR-Tools on `OrderCreated`; Redis locks from C; ES `searchDrivers` for candidates; optional LangGraph **approval** node only (the LLM does not compute VRP).

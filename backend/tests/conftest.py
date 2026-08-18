@@ -53,3 +53,13 @@ def memory_telemetry(settings):
     store = reset_store()
     yield store
     reset_store()
+
+
+@pytest.fixture(autouse=True)
+def memory_search(settings):
+    settings.ES_ENABLED = False
+    from apps.search.store import reset_search
+
+    store = reset_search()
+    yield store
+    reset_search()
