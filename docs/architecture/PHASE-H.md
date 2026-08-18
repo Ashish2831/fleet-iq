@@ -251,14 +251,14 @@ That is the original portfolio demo, with every store earned in A–G.
 
 ## 12. Phase H done when
 
-- [ ] `POST /ai/runs` with Operations agent on the Bangalore seed
-- [ ] Delayed-today answer includes numbers that match `get_delivery_metrics` / ES facets
-- [ ] Shipment-specific answer uses Redis + Mongo + at least one SOP citation
-- [ ] Dispatch explainer reads `DispatchProposal` without calling the solver
-- [ ] `propose_reassignment` opens HITL proposal; apply still only after approve
-- [ ] Maintenance agent can emit `VehicleMaintenanceDue` via outbox (stub ticket)
-- [ ] Route-risk agent can enqueue `propose_reoptimization`
-- [ ] Tenant B cannot run tools against tenant A ids
-- [ ] Trace exists in Mongo or `ai_runs` for a demo debrief
+- [x] `POST /ai/runs` with Operations agent on the Bangalore seed
+- [x] Delayed-today answer includes numbers that match `get_delivery_metrics` / ES facets
+- [x] Shipment-specific answer uses Redis + Mongo + at least one SOP citation
+- [x] Dispatch explainer reads `DispatchProposal` without calling the solver
+- [x] `propose_reassignment` opens HITL proposal; apply still only after approve
+- [x] Maintenance agent can emit `VehicleMaintenanceDue` via outbox (stub ticket)
+- [x] Route-risk agent can enqueue `propose_reoptimization`
+- [x] Tenant B cannot run tools against tenant A ids
+- [x] Trace exists in Mongo or `ai_runs` for a demo debrief
 
 Next: **Phase I** — extract Tracking, AI, Analytics as services; GraphQL federation; Next.js shell + Fleet / Dispatch / Orders / Analytics / AI microfrontends. Same APIs, new process boundaries.

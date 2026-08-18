@@ -5,7 +5,9 @@ from apps.api.graphql.views import PublicSchemaView, PublicSwaggerView, graphql_
 
 
 def health(_request):
-    return JsonResponse({"status": "ok", "phase": "F"})
+    from django.conf import settings as dj_settings
+
+    return JsonResponse({"status": "ok", "phase": "I", "role": getattr(dj_settings, "FLEETIQ_ROLE", "all")})
 
 
 urlpatterns = [

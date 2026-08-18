@@ -276,13 +276,13 @@ WebSocket later can push new pending proposals (reuse Channels). Polling 3s is e
 
 ## 12. Phase G done when
 
-- [ ] `OrderConfirmed` → `DispatchProposal` with top 3 alternatives and a score breakdown
-- [ ] Hard constraints reject bike-for-500kg and missing reefer skill
-- [ ] Auto-assign path calls `assign_route` + outbox; map eventually shows that vehicle (with C simulator)
-- [ ] HITL path: manager approve/reject in `/dispatch`
-- [ ] LangGraph (or equivalent state machine) has explicit nodes; `solve` is code
-- [ ] Redis lock + unique pending proposal prevent double assign
-- [ ] Replay of the Kafka event does not assign a second driver
-- [ ] OR-Tools wave command documented and runs on a 5-stop toy matrix
+- [x] `OrderConfirmed` → `DispatchProposal` with top 3 alternatives and a score breakdown
+- [x] Hard constraints reject bike-for-500kg and missing reefer skill
+- [x] Auto-assign path calls `assign_route` + outbox; map eventually shows that vehicle (with C simulator)
+- [x] HITL path: manager approve/reject in `/dispatch`
+- [x] LangGraph (or equivalent state machine) has explicit nodes; `solve` is code
+- [x] Redis lock + unique pending proposal prevent double assign
+- [x] Replay of the Kafka event does not assign a second driver
+- [x] OR-Tools wave command documented and runs on a 5-stop toy matrix
 
 Next: **Phase H** — Operations Agent (“Why are deliveries delayed today?” / “Why is shipment #4521 delayed?”) with tools over Postgres, Redis, Mongo, ES knowledge, and `propose_reassignment` → `DispatchProposal` + the same HITL.

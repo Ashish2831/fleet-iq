@@ -18,6 +18,8 @@ const links = [
   ["/dispatch", "Dispatch"],
   ["/analytics", "Analytics"],
   ["/ai-assistant", "AI"],
+  ["/agents", "Agents"],
+  ["/knowledge", "Knowledge"],
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

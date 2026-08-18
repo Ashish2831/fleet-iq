@@ -13,6 +13,7 @@ TOPIC_BY_EVENT = {
     "OrderCancelled": ORDERS,
     "RouteCreated": ROUTING,
     "RouteUpdated": ROUTING,
+    "RouteReoptimizationRequested": ROUTING,
     "DriverAssigned": ROUTING,
     "DriverAssigned": ROUTING,
     "DeliveryStarted": DELIVERIES,

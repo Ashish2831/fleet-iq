@@ -93,6 +93,85 @@ services:
       timeout: 5s
       retries: 20
 
+  core:
+    profiles: ["dist"]
+    build: .
+    environment:
+      FLEETIQ_ROLE: core
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    ports:
+      - "8000:8000"
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi_core:application
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  tracking:
+    profiles: ["dist"]
+    build: .
+    environment:
+      FLEETIQ_ROLE: tracking
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      MONGO_URI: mongodb://mongo:27017
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    ports:
+      - "8001:8000"
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi_tracking:application
+    depends_on:
+      - postgres
+      - redis
+      - mongo
+
+  ai:
+    profiles: ["dist"]
+    build: .
+    environment:
+      FLEETIQ_ROLE: ai
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8002:8000"
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi_core:application
+    depends_on:
+      - postgres
+
+  analytics:
+    profiles: ["dist"]
+    build: .
+    environment:
+      FLEETIQ_ROLE: analytics
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    ports:
+      - "8003:8000"
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi_core:application
+    depends_on:
+      - postgres
+
+  gateway:
+    profiles: ["dist"]
+    build: .
+    environment:
+      FLEETIQ_ROLE: gateway
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    ports:
+      - "4000:8000"
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi_core:application
+    depends_on:
+      - core
+      - tracking
+      - ai
+      - analytics
+
 volumes:
   fleetiq_pgdata:
   fleetiq_redpanda:

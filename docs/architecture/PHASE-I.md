@@ -206,14 +206,14 @@ You do not need Datadog. You need enough to say “the map is fine, the agent is
 
 ## 10. Phase I done when
 
-- [ ] Tracking process owns GPS, Redis latest, Mongo history, `/ws/fleet`
-- [ ] AI process owns `/ai/runs` and talks to Core/Tracking/ES via network tools
-- [ ] Analytics process serves KPI fields; Kafka still the input
-- [ ] Apollo/Hive gateway composes subgraphs; original `dashboard { … }` still works
-- [ ] Next.js shell loads ≥2 remotes (Fleet + Orders or Fleet + AI)
-- [ ] JWT JWKS validation on every service; tenant leak tests still pass
-- [ ] Core without Tracking still accepts `POST /orders`
-- [ ] Compose file: postgres, redis, redpanda, mongo, es, core, tracking, ai, gateway, shell
+- [x] Tracking process owns GPS, Redis latest, Mongo history, `/ws/fleet`
+- [x] AI process owns `/ai/runs` and talks to Core/Tracking/ES via network tools
+- [x] Analytics process serves KPI fields; Kafka still the input
+- [x] Apollo/Hive gateway composes subgraphs; original `dashboard { … }` still works
+- [x] Next.js shell loads ≥2 remotes (Fleet + Orders or Fleet + AI)
+- [x] JWT JWKS validation on every service; tenant leak tests still pass
+- [x] Core without Tracking still accepts `POST /orders`
+- [x] Compose file: postgres, redis, redpanda, mongo, es, core, tracking, ai, gateway, shell
 
 ---
 

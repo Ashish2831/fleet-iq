@@ -9,7 +9,12 @@ from apps.common.errors import Unauthorized
 def _encode(payload: dict, ttl: timedelta) -> str:
     now = datetime.now(timezone.utc)
     payload = {**payload, "iat": now, "exp": now + ttl}
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm="HS256")
+    return jwt.encode(
+        payload,
+        settings.JWT_SECRET,
+        algorithm="HS256",
+        headers={"kid": getattr(settings, "JWT_KID", "fleetiq-hs256")},
+    )
 
 
 def access_token(user) -> str:

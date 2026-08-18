@@ -1,5 +1,6 @@
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-export const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://127.0.0.1:8000";
+const GRAPHQL = process.env.NEXT_PUBLIC_GRAPHQL_URL ?? `${API}/graphql`;
+export const WS_URL = process.env.NEXT_PUBLIC_TRACKING_WS ?? process.env.NEXT_PUBLIC_WS_URL ?? "ws://127.0.0.1:8000";
 
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
@@ -29,7 +30,7 @@ export async function rest<T>(path: string, init: RequestInit = {}): Promise<T> 
 
 export async function gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API}/graphql`, {
+  const res = await fetch(GRAPHQL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

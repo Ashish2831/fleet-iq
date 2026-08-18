@@ -25,6 +25,11 @@ from apps.orders.services import confirm_order
 from apps.routing.models import Route as RouteModel
 from apps.routing.services import assign_route
 from apps.shipments.models import Shipment as ShipmentModel
+from apps.ai.gateway import serialize_run, start_run
+from apps.ai.models import AiRun as AiRunModel
+from apps.dispatch.models import DispatchProposal as DispatchProposalModel
+from apps.dispatch.services import approve as approve_dispatch
+from apps.dispatch.services import reject as reject_dispatch
 from apps.search.query import search_drivers, search_knowledge, search_shipments
 from apps.telemetry.queries import vehicle_track
 from apps.tracking.services import live_for_vehicle, snapshot_for_tenant
@@ -355,6 +360,8 @@ class Dashboard:
     delayed_deliveries: int
     in_transit_shipments: int
     routes: list[DashboardRoute]
+    sla_yesterday: Optional[float] = None
+    orders_yesterday: int = 0
 
     @strawberry.field
     async def live_counts(self, info: strawberry.Info) -> LiveCounts:
@@ -482,12 +489,17 @@ class DashboardQuery:
                         eta=r.eta,
                     )
                 )
+            from apps.events.kpis import tenant_kpis
+
+            kpis = tenant_kpis(tenant)
             return Dashboard(
                 active_vehicles=active_vehicles,
                 active_drivers=active_drivers,
                 delayed_deliveries=delayed,
                 in_transit_shipments=in_transit,
                 routes=routes,
+                sla_yesterday=kpis.get("sla_yesterday"),
+                orders_yesterday=kpis.get("orders_yesterday") or 0,
             )
 
         return await sync_to_async(inner)()
@@ -805,7 +817,100 @@ class SearchQuery:
 
 
 @strawberry.type
-class Query(IdentityQuery, DashboardQuery, FleetQuery, OrderQuery, RoutingQuery, SearchQuery):
+class DispatchProposalType:
+    id: strawberry.ID
+    order_id: strawberry.ID
+    order_number: str
+    status: str
+    score: Optional[float]
+    hard_pass: bool
+    chosen: strawberry.scalars.JSON
+    alternatives: strawberry.scalars.JSON
+    explanation: strawberry.scalars.JSON
+
+
+def _proposal_type(p) -> DispatchProposalType:
+    return DispatchProposalType(
+        id=str(p.id),
+        order_id=str(p.order_id),
+        order_number=p.order.order_number,
+        status=p.status,
+        score=float(p.score) if p.score is not None else None,
+        hard_pass=p.hard_pass,
+        chosen=p.chosen,
+        alternatives=p.alternatives,
+        explanation=p.explanation,
+    )
+
+
+@strawberry.type
+class DispatchQuery:
+    @strawberry.field
+    async def dispatch_proposals(self, info: strawberry.Info, status: Optional[str] = None) -> list[DispatchProposalType]:
+        user = _user(info)
+
+        def inner():
+            qs = DispatchProposalModel.objects.for_tenant(user.tenant).select_related("order")
+            if status:
+                qs = qs.filter(status=status)
+            return [_proposal_type(p) for p in qs.order_by("-created_at")[:50]]
+
+        return await sync_to_async(inner)()
+
+
+@strawberry.type
+class AiRunType:
+    id: strawberry.ID
+    agent: str
+    status: str
+    input: str
+    output: strawberry.scalars.JSON
+    proposal_id: Optional[strawberry.ID]
+    trace: strawberry.scalars.JSON
+    created_at: Optional[str]
+    completed_at: Optional[str]
+
+
+def _ai_run_type(run) -> AiRunType:
+    data = serialize_run(run)
+    return AiRunType(
+        id=data["id"],
+        agent=data["agent"],
+        status=data["status"],
+        input=data["input"],
+        output=data["output"],
+        proposal_id=data["proposal_id"],
+        trace=data["trace"],
+        created_at=data["created_at"],
+        completed_at=data["completed_at"],
+    )
+
+
+@strawberry.type
+class AiQuery:
+    @strawberry.field
+    async def ai_run(self, info: strawberry.Info, id: strawberry.ID) -> Optional[AiRunType]:
+        user = _user(info)
+
+        def inner():
+            run = AiRunModel.objects.for_tenant(user.tenant).filter(id=id).first()
+            return _ai_run_type(run) if run else None
+
+        return await sync_to_async(inner)()
+
+    @strawberry.field
+    async def ai_runs(self, info: strawberry.Info) -> list[AiRunType]:
+        user = _user(info)
+
+        def inner():
+            qs = AiRunModel.objects.for_tenant(user.tenant).order_by("-created_at")[:50]
+            return [_ai_run_type(r) for r in qs]
+
+        return await sync_to_async(inner)()
+
+
+@strawberry.type
+class Query(IdentityQuery, DashboardQuery, FleetQuery, OrderQuery, RoutingQuery, SearchQuery, DispatchQuery, AiQuery):
     pass
 
 
@@ -843,5 +948,47 @@ class Mutation:
             except ApiError as exc:
                 _gql(exc)
             return _route_type(route)
+
+        return await sync_to_async(inner)()
+
+    @strawberry.mutation
+    async def approve_dispatch(self, info: strawberry.Info, id: strawberry.ID) -> DispatchProposalType:
+        def inner():
+            user = _user(info)
+            if not (_roles(user) & WRITE_ROLES):
+                raise GraphQLError("Forbidden", extensions={"code": "FORBIDDEN"})
+            try:
+                proposal = approve_dispatch(tenant=user.tenant, proposal_id=id, actor=user)
+            except ApiError as exc:
+                _gql(exc)
+            return _proposal_type(proposal)
+
+        return await sync_to_async(inner)()
+
+    @strawberry.mutation
+    async def start_ai_run(self, info: strawberry.Info, agent: str, input: str) -> AiRunType:
+        def inner():
+            user = _user(info)
+            if not (_roles(user) & WRITE_ROLES):
+                raise GraphQLError("Forbidden", extensions={"code": "FORBIDDEN"})
+            try:
+                run = start_run(tenant=user.tenant, user=user, agent=agent, question=input)
+            except ApiError as exc:
+                _gql(exc)
+            return _ai_run_type(run)
+
+        return await sync_to_async(inner)()
+
+    @strawberry.mutation
+    async def reject_dispatch(self, info: strawberry.Info, id: strawberry.ID) -> DispatchProposalType:
+        def inner():
+            user = _user(info)
+            if not (_roles(user) & WRITE_ROLES):
+                raise GraphQLError("Forbidden", extensions={"code": "FORBIDDEN"})
+            try:
+                proposal = reject_dispatch(tenant=user.tenant, proposal_id=id, actor=user)
+            except ApiError as exc:
+                _gql(exc)
+            return _proposal_type(proposal)
 
         return await sync_to_async(inner)()

@@ -86,8 +86,16 @@ def handle_analytics(env: dict) -> None:
 
 
 def handle_dispatch(env: dict) -> None:
-    if env.get("event_type") == "OrderCreated":
-        logger.info("would dispatch order %s", env.get("aggregate_id"))
+    if env.get("event_type") != "OrderConfirmed":
+        return
+    from apps.dispatch.graph import run_dispatch
+    from apps.identity.models import Tenant
+
+    tenant = Tenant.objects.filter(id=env.get("tenant_id")).first()
+    payload = env.get("payload") or {}
+    order_id = payload.get("order_id") or env.get("aggregate_id")
+    if tenant and order_id:
+        run_dispatch(tenant, order_id, auto=True)
 
 
 def handle_search(env: dict) -> None:

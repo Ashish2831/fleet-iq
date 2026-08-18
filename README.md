@@ -2,7 +2,7 @@
 
 Multi-tenant logistics / fleet intelligence. Architecture: `docs/architecture/`.
 
-**Implemented:** Phase A (domain) · Phase B (REST + GraphQL + Next.js) · Phase C (Redis live GPS + Channels) · Phase D (outbox + Kafka/Redpanda) · Phase E (Mongo GPS history) · Phase F (Elasticsearch ops search + hybrid SOP RAG)
+**Implemented:** Phase A (domain) · Phase B (REST + GraphQL + Next.js) · Phase C (Redis live GPS + Channels) · Phase D (outbox + Kafka/Redpanda) · Phase E (Mongo GPS history) · Phase F (Elasticsearch ops search + hybrid SOP RAG) · Phase G (deterministic dispatch) · Phase H (operations agent + RAG tools + HITL) · Phase I (Tracking/AI/Analytics processes, GraphQL gateway, Next remotes)
 
 ## Run
 
@@ -31,6 +31,8 @@ python manage.py consume_events --group fleetiq-analytics
 python manage.py consume_events --group fleetiq-location
 python manage.py downsample_locations --minutes 2
 python manage.py consume_events --group fleetiq-search
+python manage.py consume_events --group fleetiq-dispatch
+python manage.py optimize_wave
 ```
 
 Set `KAFKA_ENABLED=true`, `MONGO_ENABLED=true`, and `ES_ENABLED=true` when those services are up. Leave them `false` for tests (in-memory bus, telemetry, and search). GPS history is Mongo. Ops search and SOP chunks are Elasticsearch (or the in-memory index in tests). Order create does not wait on ES.
@@ -52,6 +54,10 @@ python manage.py simulate_gps --tenant acme-logistics --interval 1
 - UI: http://localhost:3000  login `acme-logistics` / `ops@acme-logistics.example` / `password`
 - Live map: http://localhost:3000/live-map
 - Ops search: http://localhost:3000/search
+- Dispatch: http://localhost:3000/dispatch
+- AI assistant: http://localhost:3000/ai-assistant
 - Redpanda console: http://localhost:8088
 
-`pytest` in `backend/` covers tenant isolation, outbox, Kafka, Mongo history, Elasticsearch-shaped search, hybrid SOP retrieval, and tenant-scoped knowledge.
+`pytest` in `backend/` covers tenant isolation, outbox, Kafka, Mongo history, search, hybrid SOP retrieval, deterministic dispatch, the operations agent, and Phase I process boundaries (Core without Tracking still creates orders, JWKS, composed dashboard).
+
+Distributed layout (optional): `services/README.md`. `docker compose --profile dist up` starts Core, Tracking, AI, Analytics, and the GraphQL gateway. Point the shell at `NEXT_PUBLIC_GRAPHQL_URL=http://127.0.0.1:4000/graphql` and optionally `FLEET_MFE_ORIGIN` / `ORDERS_MFE_ORIGIN` for Fleet + Orders remotes.

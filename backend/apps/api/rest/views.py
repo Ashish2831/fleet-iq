@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.db import connection
 from django_filters.rest_framework import DjangoFilterBackend
@@ -62,7 +63,7 @@ class LoginThrottle(AnonRateThrottle):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health(_request):
-    return Response({"status": "ok", "phase": "F"})
+    return Response({"status": "ok", "phase": "I", "role": getattr(settings, "FLEETIQ_ROLE", "all")})
 
 
 @api_view(["GET"])

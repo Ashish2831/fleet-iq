@@ -15,6 +15,7 @@ class MemoryTelemetryStore:
         self.raw: list[dict] = []
         self.minute: list[dict] = []
         self.dedupe: set[str] = set()
+        self.traces: list[dict] = []
         self._buf: list[dict] = []
         self._lock = Lock()
 

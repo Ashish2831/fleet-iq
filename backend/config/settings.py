@@ -34,6 +34,8 @@ INSTALLED_APPS = [
     "apps.events",
     "apps.telemetry",
     "apps.search",
+    "apps.dispatch",
+    "apps.ai",
     "apps.api",
 ]
 
@@ -47,7 +49,16 @@ MIDDLEWARE = [
     "apps.api.middleware.RequestIdMiddleware",
 ]
 
-CORS_ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3002",
+    "http://localhost:4000",
+    "http://127.0.0.1:4000",
+]
 CORS_ALLOW_CREDENTIALS = True
 
 REST_FRAMEWORK = {
@@ -69,10 +80,26 @@ SPECTACULAR_SETTINGS = {
 JWT_SECRET = os.environ.get("JWT_SECRET", "dev-only-change-me-please-use-32b+")
 JWT_ACCESS_MINUTES = int(os.environ.get("JWT_ACCESS_MINUTES", "60"))
 JWT_REFRESH_DAYS = int(os.environ.get("JWT_REFRESH_DAYS", "7"))
+JWT_KID = os.environ.get("JWT_KID", "fleetiq-hs256")
+FLEETIQ_ROLE = os.environ.get("FLEETIQ_ROLE", "all")
+CORE_GRAPHQL_URL = os.environ.get("CORE_GRAPHQL_URL", "http://127.0.0.1:8000/graphql")
+TRACKING_GRAPHQL_URL = os.environ.get("TRACKING_GRAPHQL_URL", "http://127.0.0.1:8001/graphql")
+AI_GRAPHQL_URL = os.environ.get("AI_GRAPHQL_URL", "http://127.0.0.1:8002/graphql")
+ANALYTICS_GRAPHQL_URL = os.environ.get("ANALYTICS_GRAPHQL_URL", "http://127.0.0.1:8003/graphql")
 
-ROOT_URLCONF = "config.urls"
+ROOT_URLCONF = {
+    "all": "config.urls",
+    "core": "config.urls_core",
+    "tracking": "config.urls_tracking",
+    "ai": "config.urls_ai",
+    "analytics": "config.urls_analytics",
+    "gateway": "config.urls_gateway",
+}.get(FLEETIQ_ROLE, "config.urls")
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
+ASGI_APPLICATION = {
+    "tracking": "config.asgi_tracking.application",
+    "all": "config.asgi.application",
+}.get(FLEETIQ_ROLE, "config.asgi_core.application")
 
 DATABASES = {
     "default": {
