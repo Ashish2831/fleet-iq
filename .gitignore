@@ -12,3 +12,7 @@ staticfiles/
 htmlcov/
 .coverage
 backend/.env
+
+node_modules/
+package-lock.json
+apps/web/package-lock.json

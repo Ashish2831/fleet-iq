@@ -337,13 +337,13 @@ Seed path to demo:
 
 ## 14. Phase D done when
 
-- [ ] Create order / assign route / complete delivery write outbox in the same transaction
-- [ ] `outbox_publish` worker uses `SKIP LOCKED`; crash mid-loop still delivers (duplicate-safe)
-- [ ] Topics exist; Redpanda console shows envelopes with `tenant_id` + `event_id`
-- [ ] GPS ingest produces `fleetiq.vehicle.location` keyed by `vehicle_id` without a Postgres outbox row per tick
-- [ ] `fleetiq-notify` and `fleetiq-analytics` run as separate groups
-- [ ] Re-consuming the same `event_id` does not double-count
-- [ ] Poison message lands on `fleetiq.dlq`; other messages continue
-- [ ] Live map still works if Kafka is stopped (Redis path intact)
+- [x] Create order / assign route / complete delivery write outbox in the same transaction
+- [x] `outbox_publish` worker uses `SKIP LOCKED`; crash mid-loop still delivers (duplicate-safe)
+- [x] Topics exist; Redpanda console shows envelopes with `tenant_id` + `event_id`
+- [x] GPS ingest produces `fleetiq.vehicle.location` keyed by `vehicle_id` without a Postgres outbox row per tick
+- [x] `fleetiq-notify` and `fleetiq-analytics` run as separate groups
+- [x] Re-consuming the same `event_id` does not double-count
+- [x] Poison message lands on `fleetiq.dlq`; other messages continue
+- [x] Live map still works if Kafka is stopped (Redis path intact)
 
 Next: **Phase E** — `fleetiq-location` consumer writes MongoDB `vehicle_location_events` (TTL, indexes, `event_id` unique). Redis remains latest; Postgres remains OLTP.

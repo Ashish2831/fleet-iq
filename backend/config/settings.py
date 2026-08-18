@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "apps.routing",
     "apps.billing",
     "apps.tracking",
+    "apps.events",
     "apps.api",
 ]
 
@@ -110,3 +111,7 @@ CHANNEL_LAYERS = {
         },
     }
 }
+
+KAFKA_ENABLED = os.environ.get("KAFKA_ENABLED", "false").lower() == "true"
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:19092")
+KAFKA_CLIENT_ID = os.environ.get("KAFKA_CLIENT_ID", "fleetiq")

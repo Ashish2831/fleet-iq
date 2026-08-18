@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 
 from apps.common.errors import Conflict, NotFound
-from apps.common.models import OutboxEvent
+from apps.events.outbox import enqueue
 from apps.orders.models import Order, OrderItem
 
 ALLOWED = {
@@ -38,7 +38,16 @@ def confirm_order(*, tenant, order_id) -> Order:
     )
     if not order:
         raise NotFound("Order not found")
-    return _transition(order, Order.Status.CONFIRMED)
+    order = _transition(order, Order.Status.CONFIRMED)
+    enqueue(
+        tenant=tenant,
+        event_type="OrderConfirmed",
+        aggregate_type="order",
+        aggregate_id=order.id,
+        payload={"order_id": str(order.id), "order_number": order.order_number, "status": order.status},
+        partition_key=str(order.id),
+    )
+    return order
 
 
 @transaction.atomic
@@ -83,15 +92,16 @@ def create_order(
             for item in items
         ]
     )
-    OutboxEvent.objects.create(
+    enqueue(
         tenant=tenant,
+        event_type="OrderCreated",
         aggregate_type="order",
         aggregate_id=order.id,
-        event_type="OrderCreated",
         payload={
             "order_id": str(order.id),
             "order_number": order.order_number,
             "tenant_id": str(tenant.id),
         },
+        partition_key=str(order.id),
     )
     return order

@@ -33,6 +33,7 @@ from apps.orders.services import confirm_order, create_order
 from apps.routing.models import Route
 from apps.routing.services import assign_route
 from apps.shipments.models import Delivery, Shipment
+from apps.shipments.services import complete_delivery
 
 
 def _set_refresh_cookie(response, token: str):
@@ -55,7 +56,7 @@ class LoginThrottle(AnonRateThrottle):
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def health(_request):
-    return Response({"status": "ok", "phase": "C"})
+    return Response({"status": "ok", "phase": "D"})
 
 
 @api_view(["GET"])
@@ -251,3 +252,13 @@ class DeliveryViewSet(viewsets.ReadOnlyModelViewSet):
         if filter_status:
             qs = qs.filter(status=filter_status)
         return qs
+
+    @action(detail=True, methods=["post"])
+    def complete(self, request, pk=None):
+        delivery = complete_delivery(
+            tenant=request.user.tenant,
+            delivery_id=pk,
+            failed=bool(request.data.get("failed")),
+            reason=request.data.get("reason") or "",
+        )
+        return Response(DeliverySerializer(delivery).data)

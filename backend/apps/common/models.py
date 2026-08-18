@@ -46,6 +46,10 @@ class OutboxEvent(TenantModel):
     event_type = models.CharField(max_length=128)
     payload = models.JSONField(default=dict)
     published_at = models.DateTimeField(null=True, blank=True)
+    topic = models.CharField(max_length=128, blank=True)
+    partition_key = models.CharField(max_length=64, blank=True)
+    attempts = models.IntegerField(default=0)
+    last_error = models.TextField(blank=True)
 
     class Meta:
         db_table = "outbox_events"

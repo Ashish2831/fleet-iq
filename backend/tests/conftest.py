@@ -28,3 +28,13 @@ def fake_redis():
     rs._client = client
     yield client
     rs.reset_client()
+
+
+@pytest.fixture(autouse=True)
+def memory_bus(settings):
+    settings.KAFKA_ENABLED = False
+    from apps.events.bus import reset_bus
+
+    bus = reset_bus()
+    yield bus
+    reset_bus()

@@ -3,7 +3,7 @@ import uuid
 from django.db import transaction
 
 from apps.common.errors import Conflict, NotFound
-from apps.common.models import OutboxEvent
+from apps.events.outbox import enqueue
 from apps.fleet.models import Driver, Vehicle
 from apps.routing.models import Route, RouteAssignment, RouteStop
 from apps.shipments.models import Delivery
@@ -66,6 +66,19 @@ def create_route_with_stops(
             if delivery_status == Delivery.Status.IN_TRANSIT:
                 shipment.status = shipment.Status.IN_TRANSIT
                 shipment.save(update_fields=["status", "updated_at"])
+    enqueue(
+        tenant=tenant,
+        event_type="RouteCreated",
+        aggregate_type="route",
+        aggregate_id=route.id,
+        payload={
+            "route_id": str(route.id),
+            "route_number": route.route_number,
+            "status": route.status,
+            "stop_count": len(created_stops),
+        },
+        partition_key=str(route.id),
+    )
     return route
 
 
@@ -100,16 +113,17 @@ def _assign_route_locked(*, tenant, route_id, driver_id, vehicle_id) -> Route:
     if route.status == Route.Status.DRAFT:
         route.status = Route.Status.ASSIGNED
         route.save(update_fields=["status", "updated_at"])
-    OutboxEvent.objects.create(
+    enqueue(
         tenant=tenant,
+        event_type="DriverAssigned",
         aggregate_type="route",
         aggregate_id=route.id,
-        event_type="DriverAssigned",
         payload={
             "route_id": str(route.id),
             "driver_id": str(driver.id),
             "vehicle_id": str(vehicle.id),
             "assignment_id": str(assignment.id),
         },
+        partition_key=str(route.id),
     )
     return route

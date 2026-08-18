@@ -109,6 +109,20 @@ def ingest_location(*, user, payload: dict) -> dict:
             },
         )
         _maybe_eta(tenant, route, lat, lng)
+        from apps.events.gps import produce_location
+
+        produce_location(
+            tenant=tenant,
+            vehicle_id=vehicle_id,
+            event_id=event_id,
+            lat=lat,
+            lng=lng,
+            speed_kmh=speed,
+            heading=payload.get("heading"),
+            recorded_at=recorded_at,
+            battery=payload.get("battery"),
+            fuel_level=payload.get("fuel_level"),
+        )
         if rs.should_broadcast(tenant, vehicle_id, lat=lat, lng=lng, status=status):
             _broadcast(tenant, vehicle_id, live, status)
         return {"accepted": True, "duplicate": False, "status": status}
