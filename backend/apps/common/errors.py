@@ -25,3 +25,8 @@ class Conflict(ApiError):
 class Unauthorized(ApiError):
     def __init__(self, detail="Authentication required"):
         super().__init__("Unauthorized", status=401, code="UNAUTHORIZED", detail=detail)
+
+
+class Unavailable(ApiError):
+    def __init__(self, detail="Service unavailable"):
+        super().__init__("Unavailable", status=503, code="UNAVAILABLE", detail=detail)

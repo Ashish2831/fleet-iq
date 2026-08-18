@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import transaction
 
 from apps.common.errors import Conflict, NotFound
@@ -5,6 +7,7 @@ from apps.common.models import OutboxEvent
 from apps.fleet.models import Driver, Vehicle
 from apps.routing.models import Route, RouteAssignment, RouteStop
 from apps.shipments.models import Delivery
+from apps.tracking import redis_state as rs
 
 
 @transaction.atomic
@@ -66,8 +69,21 @@ def create_route_with_stops(
     return route
 
 
-@transaction.atomic
 def assign_route(*, tenant, route_id, driver_id, vehicle_id) -> Route:
+    token = str(uuid.uuid4())
+    lock_key = rs.route_lock_key(tenant, route_id)
+    got = rs.acquire(lock_key, token)
+    if got is False:
+        raise Conflict("Route is being assigned")
+    try:
+        return _assign_route_locked(tenant=tenant, route_id=route_id, driver_id=driver_id, vehicle_id=vehicle_id)
+    finally:
+        if got is True:
+            rs.release(lock_key, token)
+
+
+@transaction.atomic
+def _assign_route_locked(*, tenant, route_id, driver_id, vehicle_id) -> Route:
     route = Route.objects.select_for_update().for_tenant(tenant).filter(id=route_id).first()
     if not route:
         raise NotFound("Route not found")

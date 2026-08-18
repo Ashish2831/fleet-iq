@@ -385,13 +385,13 @@ Do **not** `INSERT` a `vehicle_locations` table in Postgres. That is how you acc
 
 ## 11. Phase C done when
 
-- [ ] `POST /api/v1/tracking/locations` authenticated, tenant-safe, rate-limited, idempotent
-- [ ] Redis hash + GEO + TTL updated; missing TTL surfaces as Offline
-- [ ] `/ws/fleet` snapshot + throttled diffs; second tenant cannot join
-- [ ] Next.js `/live-map` with live markers and Active / Delivering / Delayed / Offline counts
-- [ ] GraphQL `dashboard.liveCounts` and `vehicle.live` read Redis
-- [ ] `simulate_gps` walks Bangalore seed routes
-- [ ] `assign_route` uses a Redis lock
-- [ ] DRF login + GPS throttles are Redis-backed
+- [x] `POST /api/v1/tracking/locations` authenticated, tenant-safe, rate-limited, idempotent
+- [x] Redis hash + GEO + TTL updated; missing TTL surfaces as Offline
+- [x] `/ws/fleet` snapshot + throttled diffs; second tenant cannot join
+- [x] Next.js `/live-map` with live markers and Active / Delivering / Delayed / Offline counts
+- [x] GraphQL `dashboard.liveCounts` and `vehicle.live` read Redis
+- [x] `simulate_gps` walks Bangalore seed routes
+- [x] `assign_route` uses a Redis lock
+- [x] DRF login + GPS throttles are Redis-backed
 
 Next: **Phase D** — outbox worker publishes `OrderCreated` / `VehicleLocationUpdated` to Kafka; consumers are no-ops or log-only except you keep Redis ingest as-is. DLQ + idempotency keys on the consumer.

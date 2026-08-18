@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from enum import Enum
 from typing import Optional
 
 import strawberry
@@ -6,6 +7,7 @@ from asgiref.sync import sync_to_async
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Count, Max, Q
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from graphql import GraphQLError
 
 from apps.api.graphql.loaders import Loaders
@@ -23,6 +25,7 @@ from apps.orders.services import confirm_order
 from apps.routing.models import Route as RouteModel
 from apps.routing.services import assign_route
 from apps.shipments.models import Shipment as ShipmentModel
+from apps.tracking.services import live_for_vehicle, snapshot_for_tenant
 
 
 def _user(info: strawberry.Info) -> UserModel:
@@ -86,6 +89,40 @@ class DriverType:
     rating: Optional[float]
 
 
+@strawberry.enum
+class VehicleLiveStatus(Enum):
+    ACTIVE = "active"
+    DELIVERING = "delivering"
+    DELAYED = "delayed"
+    OFFLINE = "offline"
+    STOPPED = "stopped"
+
+
+@strawberry.type
+class VehicleLive:
+    lat: Optional[float]
+    lng: Optional[float]
+    speed_kmh: Optional[float]
+    heading: Optional[float]
+    status: VehicleLiveStatus
+    recorded_at: Optional[datetime]
+
+
+@strawberry.type
+class LiveCounts:
+    active: int
+    delivering: int
+    delayed: int
+    offline: int
+
+
+def _live_status(raw: str | None) -> VehicleLiveStatus:
+    if raw in ("idle_on_route", "stopped"):
+        return VehicleLiveStatus.STOPPED
+    mapping = {item.value: item for item in VehicleLiveStatus}
+    return mapping.get(raw or "", VehicleLiveStatus.OFFLINE)
+
+
 @strawberry.type(name="Vehicle")
 class VehicleGql:
     id: strawberry.ID
@@ -94,6 +131,32 @@ class VehicleGql:
     make: str
     model: str
     vehicle_type_name: str
+
+    @strawberry.field
+    async def live(self, info: strawberry.Info) -> Optional[VehicleLive]:
+        def inner():
+            data = live_for_vehicle(info.context.tenant, str(self.id))
+            if not data:
+                return VehicleLive(
+                    lat=None,
+                    lng=None,
+                    speed_kmh=None,
+                    heading=None,
+                    status=VehicleLiveStatus.OFFLINE,
+                    recorded_at=None,
+                )
+            recorded = data.get("recorded_at")
+            dt = parse_datetime(recorded) if recorded else None
+            return VehicleLive(
+                lat=data.get("lat"),
+                lng=data.get("lng"),
+                speed_kmh=data.get("speed_kmh"),
+                heading=data.get("heading"),
+                status=_live_status(data.get("status")),
+                recorded_at=dt,
+            )
+
+        return await sync_to_async(inner)()
 
 
 @strawberry.type
@@ -252,6 +315,20 @@ class Dashboard:
     delayed_deliveries: int
     in_transit_shipments: int
     routes: list[DashboardRoute]
+
+    @strawberry.field
+    async def live_counts(self, info: strawberry.Info) -> LiveCounts:
+        def inner():
+            snap = snapshot_for_tenant(info.context.tenant)
+            c = snap["counts"]
+            return LiveCounts(
+                active=c.get("active") or 0,
+                delivering=c.get("delivering") or 0,
+                delayed=c.get("delayed") or 0,
+                offline=c.get("offline") or 0,
+            )
+
+        return await sync_to_async(inner)()
 
 
 @strawberry.type

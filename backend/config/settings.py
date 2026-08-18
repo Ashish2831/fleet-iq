@@ -11,6 +11,7 @@ DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 INSTALLED_APPS = [
+    "daphne",
     "django.contrib.contenttypes",
     "django.contrib.auth",
     "django.contrib.sessions",
@@ -20,6 +21,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "django_filters",
     "drf_spectacular",
+    "channels",
     "apps.common",
     "apps.identity",
     "apps.catalog",
@@ -28,6 +30,7 @@ INSTALLED_APPS = [
     "apps.shipments",
     "apps.routing",
     "apps.billing",
+    "apps.tracking",
     "apps.api",
 ]
 
@@ -52,7 +55,7 @@ REST_FRAMEWORK = {
     "PAGE_SIZE": 25,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.api.exceptions.exception_handler",
-    "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "300/min"},
+    "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "300/min", "gps": "30/min"},
 }
 
 SPECTACULAR_SETTINGS = {
@@ -87,3 +90,23 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 AUTH_PASSWORD_VALIDATORS = []
+
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6380/0")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+    }
+}
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+            "capacity": 1000,
+            "expiry": 15,
+        },
+    }
+}

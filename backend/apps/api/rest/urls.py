@@ -2,6 +2,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.api.rest import views
+from apps.tracking import views as tracking_views
 
 router = DefaultRouter()
 router.register("drivers", views.DriverViewSet, basename="driver")
@@ -19,5 +20,7 @@ urlpatterns = [
     path("auth/login", views.login),
     path("auth/refresh", views.refresh),
     path("me", views.me),
+    path("tracking/locations", tracking_views.ingest),
+    path("tracking/vehicles", tracking_views.vehicles_snapshot),
     path("", include(router.urls)),
 ]

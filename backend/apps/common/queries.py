@@ -86,5 +86,17 @@ def delayed_shipments(tenant, now=None):
     return Shipment.objects.for_tenant(tenant).filter(promised_at__lt=now).exclude(status__in=terminal)
 
 
+def delayed_vehicle_ids(tenant, now=None) -> set[str]:
+    """Vehicles currently on an in-progress route that still has a delayed shipment."""
+    ship_ids = delayed_shipments(tenant, now=now).values("id")
+    ids = (
+        Route.objects.for_tenant(tenant)
+        .filter(status=Route.Status.IN_PROGRESS, stops__shipment_id__in=ship_ids)
+        .values_list("assignment__vehicle_id", flat=True)
+        .distinct()
+    )
+    return {str(vid) for vid in ids if vid}
+
+
 def vehicles_by_device_id(tenant, device_id: str):
     return Vehicle.objects.for_tenant(tenant).filter(metadata__device_id=device_id)

@@ -12,6 +12,7 @@ const links = [
   ["/shipments", "Shipments"],
   ["/drivers", "Drivers"],
   ["/vehicles", "Vehicles"],
+  ["/live-map", "Live map"],
   ["/routes", "Routes"],
   ["/dispatch", "Dispatch"],
   ["/analytics", "Analytics"],
