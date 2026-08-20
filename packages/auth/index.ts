@@ -26,3 +26,5 @@ export function apiUrl(): string {
 export function trackingWs(): string {
   return process.env.NEXT_PUBLIC_TRACKING_WS ?? "ws://127.0.0.1:8001";
 }
+
+export { escapeHtml, sanitizeText } from "../sanitize/index";

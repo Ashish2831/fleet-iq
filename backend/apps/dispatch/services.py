@@ -7,30 +7,31 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.common.errors import Conflict, NotFound
+from apps.common.repositories import (
+    DispatchProposalRepository,
+    DriverRepository,
+    OrderRepository,
+    RouteRepository,
+    ShipmentRepository,
+    VehicleRepository,
+)
 from apps.dispatch.models import DispatchProposal
 from apps.dispatch.solver import solve_insertion
 from apps.events.outbox import enqueue
-from apps.fleet.models import Driver, Vehicle
 from apps.orders.models import Order
-from apps.routing.models import Route
 from apps.routing.services import assign_route, create_route_with_stops
-from apps.shipments.models import Shipment
 from apps.tracking import redis_state as rs
 
 
 def propose(*, tenant, order_id) -> DispatchProposal:
-    order = Order.objects.for_tenant(tenant).filter(id=order_id).first()
+    order = OrderRepository(tenant).get(order_id)
     if not order:
         raise NotFound("Order not found")
     return build_proposal(tenant=tenant, order=order)
 
 
 def existing_pending(tenant, order_id) -> DispatchProposal | None:
-    return (
-        DispatchProposal.objects.for_tenant(tenant)
-        .filter(order_id=order_id, status=DispatchProposal.Status.PENDING)
-        .first()
-    )
+    return DispatchProposalRepository(tenant).pending_for_order(order_id)
 
 
 def build_proposal(*, tenant, order: Order) -> DispatchProposal:
@@ -45,8 +46,7 @@ def build_proposal(*, tenant, order: Order) -> DispatchProposal:
         else DispatchProposal.Status.PENDING
     )
     try:
-        return DispatchProposal.objects.create(
-            tenant=tenant,
+        return DispatchProposalRepository(tenant).create(
             order=order,
             status=status,
             chosen=chosen,
@@ -90,21 +90,20 @@ def apply_proposal(proposal: DispatchProposal, *, actor=None) -> DispatchProposa
         DispatchProposal.Status.APPROVED,
     ):
         raise Conflict(f"Cannot apply proposal in status {proposal.status}")
-    order = Order.objects.get(pk=proposal.order_id)
+    order = OrderRepository(proposal.tenant).get(proposal.order_id)
+    if not order:
+        raise NotFound("Order not found")
     chosen = proposal.chosen or {}
     if not chosen.get("driver_id") or not chosen.get("vehicle_id"):
         proposal.status = DispatchProposal.Status.FAILED
         proposal.save(update_fields=["status", "updated_at"])
         raise Conflict("No feasible assignment")
-    driver = Driver.objects.for_tenant(proposal.tenant).get(pk=chosen["driver_id"])
-    vehicle = Vehicle.objects.for_tenant(proposal.tenant).get(pk=chosen["vehicle_id"])
+    driver = DriverRepository(proposal.tenant).get(chosen["driver_id"])
+    vehicle = VehicleRepository(proposal.tenant).get(chosen["vehicle_id"])
+    if not driver or not vehicle:
+        raise NotFound("Driver or vehicle not found")
     dest = None
-    ship = (
-        Shipment.objects.for_tenant(proposal.tenant)
-        .filter(shipment_items__order_item__order=order)
-        .select_related("delivery_address", "warehouse")
-        .first()
-    )
+    ship = ShipmentRepository(proposal.tenant).for_order(order.id)
     if ship:
         dest = ship.delivery_address
     from apps.dispatch.constraints import hard_check
@@ -128,7 +127,9 @@ def _apply_locked(proposal, order, driver, vehicle, chosen, actor):
             driver_id=driver.id,
             vehicle_id=vehicle.id,
         )
-        route = Route.objects.get(pk=route_id)
+        route = RouteRepository(proposal.tenant).get(route_id)
+        if not route:
+            raise NotFound("Route not found")
     else:
         warehouse = order.warehouse
         stops = [
@@ -141,9 +142,9 @@ def _apply_locked(proposal, order, driver, vehicle, chosen, actor):
         ]
         seq = 2
         ships = (
-            Shipment.objects.for_tenant(proposal.tenant)
+            ShipmentRepository(proposal.tenant)
+            .qs()
             .filter(shipment_items__order_item__order=order)
-            .select_related("delivery_address", "warehouse")
             .distinct()
         )
         for ship in ships:

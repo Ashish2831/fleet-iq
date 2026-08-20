@@ -3,8 +3,17 @@ import uuid
 from django.db import transaction
 
 from apps.common.errors import Conflict, NotFound
+from apps.common.repositories import (
+    DeliveryRepository,
+    DriverRepository,
+    RouteAssignmentRepository,
+    RouteRepository,
+    RouteStopRepository,
+    VehicleRepository,
+)
+from apps.common.sanitize import sanitize_text
 from apps.events.outbox import enqueue
-from apps.fleet.models import Driver, Vehicle
+from apps.fleet.models import Vehicle
 from apps.routing.models import Route, RouteAssignment, RouteStop
 from apps.shipments.models import Delivery
 from apps.tracking import redis_state as rs
@@ -28,20 +37,20 @@ def create_route_with_stops(
     """
     if status is None:
         status = Route.Status.ASSIGNED if driver and vehicle else Route.Status.DRAFT
-    route = Route.objects.create(
-        tenant=tenant,
-        route_number=route_number,
+    route = RouteRepository(tenant).create(
+        route_number=sanitize_text(route_number, max_len=64),
         planned_date=planned_date,
         status=status,
     )
     if driver and vehicle:
-        RouteAssignment.objects.create(
-            tenant=tenant, route=route, driver=driver, vehicle=vehicle
+        RouteAssignmentRepository(tenant).create(
+            route=route, driver=driver, vehicle=vehicle
         )
     created_stops = []
+    stop_repo = RouteStopRepository(tenant)
+    delivery_repo = DeliveryRepository(tenant)
     for spec in stops:
-        stop = RouteStop.objects.create(
-            tenant=tenant,
+        stop = stop_repo.create(
             route=route,
             stop_type=spec["stop_type"],
             sequence=spec["sequence"],
@@ -56,8 +65,7 @@ def create_route_with_stops(
         if stop.stop_type == RouteStop.StopType.DROPOFF:
             shipment = spec["shipment"]
             delivery_status = spec.get("delivery_status", Delivery.Status.PENDING)
-            Delivery.objects.create(
-                tenant=tenant,
+            delivery_repo.create(
                 shipment=shipment,
                 route_stop=stop,
                 status=delivery_status,
@@ -97,11 +105,11 @@ def assign_route(*, tenant, route_id, driver_id, vehicle_id) -> Route:
 
 @transaction.atomic
 def _assign_route_locked(*, tenant, route_id, driver_id, vehicle_id) -> Route:
-    route = Route.objects.select_for_update().for_tenant(tenant).filter(id=route_id).first()
+    route = RouteRepository(tenant).for_update(route_id)
     if not route:
         raise NotFound("Route not found")
-    driver = Driver.objects.for_tenant(tenant).filter(id=driver_id, deleted_at__isnull=True).first()
-    vehicle = Vehicle.objects.for_tenant(tenant).filter(id=vehicle_id, deleted_at__isnull=True).first()
+    driver = DriverRepository(tenant).get(driver_id)
+    vehicle = VehicleRepository(tenant).get(vehicle_id)
     if not driver or not vehicle:
         raise NotFound("Driver or vehicle not found")
     if vehicle.status == Vehicle.Status.MAINTENANCE:

@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.common.models import OutboxEvent
+from apps.common.patterns.observer import DomainEvent, domain_events
 from apps.events.bus import EventBus, get_bus
 from apps.events.envelopes import envelope, kafka_headers, topic_for
 
@@ -32,7 +33,7 @@ def enqueue(
         payload=payload,
         correlation_id=correlation_id,
     )
-    return OutboxEvent.objects.create(
+    row = OutboxEvent.objects.create(
         id=env["event_id"],
         tenant=tenant,
         aggregate_type=aggregate_type,
@@ -42,6 +43,22 @@ def enqueue(
         topic=topic_for(event_type),
         partition_key=str(partition_key or aggregate_id),
     )
+    tenant_id = str(tenant.id)
+    agg_id = str(aggregate_id)
+    snapshot = dict(payload)
+
+    def _emit():
+        domain_events.emit(
+            DomainEvent(
+                type=event_type,
+                payload=snapshot,
+                tenant_id=tenant_id,
+                aggregate_id=agg_id,
+            )
+        )
+
+    transaction.on_commit(_emit)
+    return row
 
 
 def publish_batch(*, limit: int = 100, bus: EventBus | None = None) -> dict:

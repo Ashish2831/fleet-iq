@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { rest } from "@/lib/api";
+import { rest, sanitizeText } from "@/lib/api";
 
 const AGENTS = [
   { id: "operations", title: "Operations", blurb: "Why delayed? Tools over Postgres, Redis, Mongo, ES. May propose reassignment." },
@@ -19,7 +19,7 @@ export default function AgentsPage() {
   useEffect(() => {
     rest<Run[]>("/api/v1/ai/runs")
       .then(setRuns)
-      .catch((e) => setErr(e.message));
+      .catch((e) => setErr(sanitizeText(e instanceof Error ? e.message : "Failed", 200)));
   }, []);
 
   return (
@@ -35,7 +35,10 @@ export default function AgentsPage() {
               <b style={{ fontSize: 18, color: "inherit" }}>{a.title}</b>
               <span>{a.blurb}</span>
               <p className="muted" style={{ marginTop: 12 }}>
-                Last: {last ? `${last.status} — ${last.input.slice(0, 48)}` : "no runs yet"}
+                Last:{" "}
+                {last
+                  ? `${sanitizeText(last.status, 32)} — ${sanitizeText(last.input, 48)}`
+                  : "no runs yet"}
               </p>
             </div>
           );

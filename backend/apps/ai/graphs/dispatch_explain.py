@@ -5,20 +5,23 @@ import re
 from apps.ai.context import ToolContext
 from apps.ai.tools import call_tool
 from apps.common.errors import NotFound
-from apps.orders.models import Order
+from apps.common.repositories import OrderRepository
+from apps.common.sanitize import sanitize_text
 
 ORDER_RE = re.compile(r"(ACM-[A-Za-z0-9-]+)|order\s+#?([A-Za-z0-9-]+)", re.I)
 
 
 def run(ctx: ToolContext, question: str) -> dict:
     agent = "dispatch_explain"
+    question = sanitize_text(question, max_len=4000)
     m = ORDER_RE.search(question)
     number = (m.group(1) or m.group(2)) if m else None
+    orders = OrderRepository(ctx.tenant)
     order = None
     if number:
-        order = Order.objects.for_tenant(ctx.tenant).filter(order_number=number).first()
+        order = orders.by_number(sanitize_text(number, max_len=64))
     if order is None:
-        order = Order.objects.for_tenant(ctx.tenant).order_by("-created_at").first()
+        order = orders.qs().order_by("-created_at").first()
     if not order:
         return {
             "summary": "No order found for this tenant.",

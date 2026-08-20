@@ -12,6 +12,8 @@ from strawberry import Schema
 
 from apps.api.graphql.schema import (
     AiRunType,
+    CoreMutation,
+    CoreQuery,
     LiveCounts,
     TrackPoint,
     VehicleLive,
@@ -24,14 +26,15 @@ from apps.api.permissions import WRITE_ROLES, _roles
 from apps.ai.gateway import start_run
 from apps.ai.models import AiRun as AiRunModel
 from apps.common.errors import ApiError
+from apps.common.repositories import VehicleRepository
+from apps.common.sanitize import sanitize_text
 from apps.events.kpis import tenant_kpis
-from apps.fleet.models import Vehicle as VehicleModel
 from apps.telemetry.queries import vehicle_track
 from apps.tracking.services import live_for_vehicle, snapshot_for_tenant
 from django.utils.dateparse import parse_datetime
 
 
-@strawberry.type
+@strawberry.type(name="Vehicle")
 class TrackingVehicle:
     id: strawberry.ID
 
@@ -115,7 +118,7 @@ class TrackingQuery:
         user = _user(info)
 
         def inner():
-            row = VehicleModel.objects.for_tenant(user.tenant).filter(id=id, deleted_at__isnull=True).first()
+            row = VehicleRepository(user.tenant).get(id)
             return TrackingVehicle(id=str(row.id)) if row else None
 
         return await sync_to_async(inner)()
@@ -179,7 +182,12 @@ class AiSubgraphMutation:
             if not (_roles(user) & WRITE_ROLES):
                 raise GraphQLError("Forbidden", extensions={"code": "FORBIDDEN"})
             try:
-                run = start_run(tenant=user.tenant, user=user, agent=agent, question=input)
+                run = start_run(
+                    tenant=user.tenant,
+                    user=user,
+                    agent=sanitize_text(agent, max_len=64),
+                    question=sanitize_text(input, max_len=4000),
+                )
             except ApiError as exc:
                 raise GraphQLError(exc.detail, extensions={"code": exc.code}) from exc
             return _ai_run_type(run)
@@ -187,6 +195,7 @@ class AiSubgraphMutation:
         return await sync_to_async(inner)()
 
 
+core_schema = Schema(query=CoreQuery, mutation=CoreMutation)
 tracking_schema = Schema(query=TrackingQuery)
 analytics_schema = Schema(query=AnalyticsQuery)
 ai_schema = Schema(query=AiSubgraphQuery, mutation=AiSubgraphMutation)

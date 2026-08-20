@@ -2,14 +2,23 @@ from django.db.models import Count, Exists, F, OuterRef, Prefetch, Q, Subquery, 
 from django.db.models.functions import RowNumber
 from django.utils import timezone
 
-from apps.fleet.models import Driver, FuelTransaction, MaintenanceRecord, Vehicle, VehicleAssignment
+from apps.common.repositories import (
+    DeliveryRepository,
+    DriverRepository,
+    RouteRepository,
+    ShipmentRepository,
+    VehicleRepository,
+)
+from apps.common.sanitize import sanitize_text
+from apps.fleet.models import Driver, FuelTransaction, MaintenanceRecord, VehicleAssignment
 from apps.routing.models import Route, RouteStop
 from apps.shipments.models import Delivery, Shipment
 
 
 def routes_for_day(tenant, day):
     return (
-        Route.objects.for_tenant(tenant)
+        RouteRepository(tenant)
+        .tenant_qs()
         .filter(planned_date=day)
         .select_related(
             "assignment__driver",
@@ -27,8 +36,9 @@ def routes_for_day(tenant, day):
 def available_drivers_without_vehicle(tenant):
     current_asg = VehicleAssignment.objects.filter(driver_id=OuterRef("pk"), ends_at__isnull=True)
     return (
-        Driver.objects.for_tenant(tenant)
-        .filter(deleted_at__isnull=True, status=Driver.Status.AVAILABLE)
+        DriverRepository(tenant)
+        .qs()
+        .filter(status=Driver.Status.AVAILABLE)
         .annotate(has_vehicle=Exists(current_asg))
         .filter(has_vehicle=False)
     )
@@ -40,20 +50,20 @@ def latest_fuel_cost_per_vehicle(tenant):
         .order_by("-occurred_at")
         .values("cost")[:1]
     )
-    return Vehicle.objects.for_tenant(tenant).annotate(latest_fuel_cost=Subquery(latest))
+    return VehicleRepository(tenant).tenant_qs().annotate(latest_fuel_cost=Subquery(latest))
 
 
 def vehicles_on_in_progress_routes(tenant):
-    busy = Route.objects.filter(
+    busy = RouteRepository(tenant).tenant_qs().filter(
         assignment__vehicle_id=OuterRef("pk"),
         status=Route.Status.IN_PROGRESS,
     )
-    return Vehicle.objects.for_tenant(tenant).annotate(busy=Exists(busy)).filter(busy=True)
+    return VehicleRepository(tenant).tenant_qs().annotate(busy=Exists(busy)).filter(busy=True)
 
 
 def delivery_counts(tenant, day=None, now=None):
     now = now or timezone.now()
-    qs = Delivery.objects.for_tenant(tenant)
+    qs = DeliveryRepository(tenant).tenant_qs()
     if day is not None:
         qs = qs.filter(created_at__date=day)
     return qs.aggregate(
@@ -83,14 +93,20 @@ def last_n_maintenance_per_vehicle(tenant, n=3):
 def delayed_shipments(tenant, now=None):
     now = now or timezone.now()
     terminal = [Shipment.Status.DELIVERED, Shipment.Status.FAILED, Shipment.Status.CANCELLED]
-    return Shipment.objects.for_tenant(tenant).filter(promised_at__lt=now).exclude(status__in=terminal)
+    return (
+        ShipmentRepository(tenant)
+        .tenant_qs()
+        .filter(promised_at__lt=now)
+        .exclude(status__in=terminal)
+    )
 
 
 def delayed_vehicle_ids(tenant, now=None) -> set[str]:
     """Vehicles currently on an in-progress route that still has a delayed shipment."""
     ship_ids = delayed_shipments(tenant, now=now).values("id")
     ids = (
-        Route.objects.for_tenant(tenant)
+        RouteRepository(tenant)
+        .tenant_qs()
         .filter(status=Route.Status.IN_PROGRESS, stops__shipment_id__in=ship_ids)
         .values_list("assignment__vehicle_id", flat=True)
         .distinct()
@@ -99,4 +115,6 @@ def delayed_vehicle_ids(tenant, now=None) -> set[str]:
 
 
 def vehicles_by_device_id(tenant, device_id: str):
-    return Vehicle.objects.for_tenant(tenant).filter(metadata__device_id=device_id)
+    return VehicleRepository(tenant).tenant_qs().filter(
+        metadata__device_id=sanitize_text(device_id, max_len=128)
+    )

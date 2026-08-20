@@ -10,10 +10,16 @@ from apps.ai.context import ToolContext
 from apps.ai.policies import AGENT_TOOLS, MAX_TOOL_CALLS, WRITE_TOOLS
 from apps.common.errors import Forbidden, NotFound
 from apps.common.queries import delayed_shipments, delivery_counts
-from apps.dispatch.models import DispatchProposal
+from apps.common.repositories import (
+    DispatchProposalRepository,
+    DriverRepository,
+    ShipmentRepository,
+    VehicleRepository,
+)
+from apps.common.sanitize import sanitize_text
 from apps.dispatch.services import propose
 from apps.events.outbox import enqueue
-from apps.fleet.models import Driver, MaintenanceRecord, Vehicle
+from apps.fleet.models import MaintenanceRecord
 from apps.search.query import search_drivers, search_knowledge, search_shipments
 from apps.shipments.models import Shipment
 from apps.telemetry.queries import vehicle_track
@@ -31,20 +37,40 @@ def call_tool(ctx: ToolContext, agent: str, name: str, node: str, **kwargs):
     ctx.calls += 1
     if ctx.calls > MAX_TOOL_CALLS:
         raise ToolLoop("max tool calls exceeded")
+    # Sanitize free-text tool args before execution
+    for key in ("q", "number", "reason", "area", "city", "status"):
+        if key in kwargs and kwargs[key] is not None:
+            kwargs[key] = sanitize_text(kwargs[key], max_len=500)
     result = TOOLS[name](ctx, **kwargs)
     ctx.log(node, name, kwargs, result)
     return result
 
 
 def _shipments(ctx: ToolContext):
-    return Shipment.objects.for_tenant(ctx.tenant)
+    return ShipmentRepository(ctx.tenant).qs()
 
 
 def get_shipment(ctx: ToolContext, id=None, number=None) -> dict:
-    qs = _shipments(ctx).select_related("delivery_address", "warehouse")
-    ship = qs.filter(id=id).first() if id else None
+    from apps.ai.remote import fetch_shipment
+
+    remote = fetch_shipment(ctx, id=id, number=number)
+    if remote is not None:
+        return {
+            "id": str(remote.get("id") or ""),
+            "shipment_number": remote.get("shipment_number") or remote.get("number") or number,
+            "status": remote.get("status"),
+            "promised_at": remote.get("promised_at") or remote.get("promisedAt"),
+            "city": remote.get("city") or (remote.get("delivery_address") or {}).get("city"),
+            "address": remote.get("address") or (remote.get("delivery_address") or {}).get("line1"),
+            "warehouse_code": remote.get("warehouse_code"),
+            "delayed": remote.get("delayed"),
+            "vehicle_id": remote.get("vehicle_id"),
+            "order_id": remote.get("order_id"),
+        }
+    repo = ShipmentRepository(ctx.tenant)
+    ship = repo.get(id) if id else None
     if ship is None and number:
-        ship = qs.filter(shipment_number=number).first()
+        ship = repo.by_number(number)
     if ship is None:
         raise NotFound("Shipment not found")
     vehicle_id = None
@@ -96,13 +122,13 @@ def get_delivery_metrics(ctx: ToolContext, city=None) -> dict:
 
 
 def get_vehicle_live(ctx: ToolContext, vehicle_id: str) -> dict:
-    if not Vehicle.objects.for_tenant(ctx.tenant).filter(id=vehicle_id).exists():
+    if not VehicleRepository(ctx.tenant).exists(id=vehicle_id):
         raise NotFound("Vehicle not found")
     return live_for_vehicle(ctx.tenant, str(vehicle_id)) or {"status": "offline"}
 
 
 def get_vehicle_track(ctx: ToolContext, vehicle_id: str) -> dict:
-    if not Vehicle.objects.for_tenant(ctx.tenant).filter(id=vehicle_id).exists():
+    if not VehicleRepository(ctx.tenant).exists(id=vehicle_id):
         raise NotFound("Vehicle not found")
     end = timezone.now()
     start = end - timedelta(hours=1)
@@ -120,7 +146,8 @@ def get_vehicle_track(ctx: ToolContext, vehicle_id: str) -> dict:
 
 def get_dispatch_proposal(ctx: ToolContext, order_id: str) -> dict:
     p = (
-        DispatchProposal.objects.for_tenant(ctx.tenant)
+        DispatchProposalRepository(ctx.tenant)
+        .qs()
         .select_related("order")
         .filter(order_id=order_id)
         .order_by("-created_at")
@@ -141,7 +168,7 @@ def get_dispatch_proposal(ctx: ToolContext, order_id: str) -> dict:
 
 
 def get_driver(ctx: ToolContext, id: str) -> dict:
-    d = Driver.objects.for_tenant(ctx.tenant).filter(id=id, deleted_at__isnull=True).first()
+    d = DriverRepository(ctx.tenant).get(id)
     if not d:
         raise NotFound("Driver not found")
     return {
@@ -198,22 +225,23 @@ def propose_reoptimization(ctx: ToolContext, route_id: str, reason="") -> dict:
 
 
 def open_maintenance_ticket(ctx: ToolContext, vehicle_id: str, reason="") -> dict:
-    vehicle = Vehicle.objects.for_tenant(ctx.tenant).filter(id=vehicle_id).first()
+    vehicle = VehicleRepository(ctx.tenant).get(vehicle_id)
     if not vehicle:
         raise NotFound("Vehicle not found")
+    notes = sanitize_text(reason or "Opened by maintenance agent", max_len=500)
     rec = MaintenanceRecord.objects.create(
         tenant=ctx.tenant,
         vehicle=vehicle,
         kind="inspection",
         occurred_at=timezone.now(),
-        notes=reason or "Opened by maintenance agent",
+        notes=notes,
     )
     enqueue(
         tenant=ctx.tenant,
         event_type="VehicleMaintenanceDue",
         aggregate_type="vehicle",
         aggregate_id=vehicle.id,
-        payload={"vehicle_id": str(vehicle.id), "record_id": str(rec.id), "reason": reason},
+        payload={"vehicle_id": str(vehicle.id), "record_id": str(rec.id), "reason": notes},
         partition_key=str(vehicle.id),
     )
     return {"ticket_id": str(rec.id), "vehicle_id": str(vehicle.id), "applied": False}

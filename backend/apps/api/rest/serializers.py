@@ -1,14 +1,31 @@
 from rest_framework import serializers
 
 from apps.catalog.models import Address, Customer, Warehouse
+from apps.common.sanitize import sanitize_text
 from apps.fleet.models import Driver, Vehicle
 from apps.identity.models import User
 from apps.orders.models import Order, OrderItem
-from apps.routing.models import Route, RouteAssignment, RouteStop
+from apps.routing.models import Route, RouteStop
 from apps.shipments.models import Delivery, Shipment
 
 
+class SanitizedCharField(serializers.CharField):
+    def __init__(self, *args, max_sanitize_len: int | None = None, **kwargs):
+        self.max_sanitize_len = max_sanitize_len
+        super().__init__(*args, **kwargs)
+
+    def to_internal_value(self, data):
+        value = super().to_internal_value(data)
+        max_len = self.max_sanitize_len or self.max_length or 4000
+        return sanitize_text(value, max_len=max_len)
+
+
 class AddressSerializer(serializers.ModelSerializer):
+    line1 = SanitizedCharField(max_length=255)
+    city = SanitizedCharField(max_length=128)
+    state = SanitizedCharField(required=False, allow_blank=True, max_length=128)
+    postal_code = SanitizedCharField(required=False, allow_blank=True, max_length=32)
+
     class Meta:
         model = Address
         fields = ("id", "line1", "city", "state", "postal_code", "lat", "lng")
@@ -27,6 +44,10 @@ class MeSerializer(serializers.ModelSerializer):
 
 
 class DriverSerializer(serializers.ModelSerializer):
+    employee_code = SanitizedCharField(max_length=64)
+    full_name = SanitizedCharField(max_length=255)
+    phone = SanitizedCharField(required=False, allow_blank=True, max_length=32)
+
     class Meta:
         model = Driver
         fields = (
@@ -45,6 +66,9 @@ class DriverSerializer(serializers.ModelSerializer):
 
 class VehicleSerializer(serializers.ModelSerializer):
     vehicle_type_name = serializers.CharField(source="vehicle_type.name", read_only=True)
+    plate_number = SanitizedCharField(max_length=32)
+    make = SanitizedCharField(required=False, allow_blank=True, max_length=64)
+    model = SanitizedCharField(required=False, allow_blank=True, max_length=64)
 
     class Meta:
         model = Vehicle
@@ -65,6 +89,8 @@ class VehicleSerializer(serializers.ModelSerializer):
 class WarehouseSerializer(serializers.ModelSerializer):
     address = AddressSerializer(read_only=True)
     address_id = serializers.UUIDField(write_only=True)
+    code = SanitizedCharField(max_length=32)
+    name = SanitizedCharField(max_length=255)
 
     class Meta:
         model = Warehouse
@@ -73,6 +99,10 @@ class WarehouseSerializer(serializers.ModelSerializer):
 
 
 class CustomerSerializer(serializers.ModelSerializer):
+    name = SanitizedCharField(max_length=255)
+    email = SanitizedCharField(required=False, allow_blank=True, max_length=254)
+    phone = SanitizedCharField(required=False, allow_blank=True, max_length=32)
+
     class Meta:
         model = Customer
         fields = ("id", "name", "email", "phone")
@@ -87,8 +117,8 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 
 class OrderItemWriteSerializer(serializers.Serializer):
-    sku = serializers.CharField()
-    description = serializers.CharField(required=False, allow_blank=True, default="")
+    sku = SanitizedCharField(max_length=64)
+    description = SanitizedCharField(required=False, allow_blank=True, default="", max_length=255)
     quantity = serializers.DecimalField(max_digits=12, decimal_places=3)
     weight_kg = serializers.DecimalField(max_digits=10, decimal_places=3)
     temperature_min = serializers.DecimalField(max_digits=5, decimal_places=2, required=False)
@@ -98,9 +128,9 @@ class OrderItemWriteSerializer(serializers.Serializer):
 class OrderWriteSerializer(serializers.Serializer):
     customer_id = serializers.UUIDField()
     warehouse_id = serializers.UUIDField()
-    order_number = serializers.CharField()
+    order_number = SanitizedCharField(max_length=64)
     deadline_at = serializers.DateTimeField(required=False)
-    notes = serializers.CharField(required=False, allow_blank=True, default="")
+    notes = SanitizedCharField(required=False, allow_blank=True, default="", max_length=4000)
     items = OrderItemWriteSerializer(many=True)
 
 
@@ -129,6 +159,8 @@ class OrderReadSerializer(serializers.ModelSerializer):
 
 
 class ShipmentSerializer(serializers.ModelSerializer):
+    shipment_number = SanitizedCharField(max_length=64)
+
     class Meta:
         model = Shipment
         fields = (
@@ -153,6 +185,7 @@ class RouteSerializer(serializers.ModelSerializer):
     driver_name = serializers.CharField(source="assignment.driver.full_name", read_only=True, default=None)
     vehicle_plate = serializers.CharField(source="assignment.vehicle.plate_number", read_only=True, default=None)
     stops = RouteStopSerializer(many=True, read_only=True)
+    route_number = SanitizedCharField(max_length=64)
 
     class Meta:
         model = Route
@@ -175,6 +208,7 @@ class AssignRouteSerializer(serializers.Serializer):
 class DeliverySerializer(serializers.ModelSerializer):
     shipment_number = serializers.CharField(source="shipment.shipment_number", read_only=True)
     promised_at = serializers.DateTimeField(source="shipment.promised_at", read_only=True)
+    failure_reason = SanitizedCharField(required=False, allow_blank=True, max_length=500)
 
     class Meta:
         model = Delivery

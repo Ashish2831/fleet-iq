@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from apps.ai.context import ToolContext
 from apps.ai.tools import call_tool
-from apps.fleet.models import Vehicle
+from apps.common.repositories import VehicleRepository
+from apps.common.sanitize import sanitize_text
 
 
 def run(ctx: ToolContext, question: str) -> dict:
     agent = "maintenance"
-    vehicle = Vehicle.objects.for_tenant(ctx.tenant).filter(deleted_at__isnull=True).first()
+    question = sanitize_text(question, max_len=4000)
+    vehicle = VehicleRepository(ctx.tenant).qs().first()
     if not vehicle:
         return {
             "summary": "No vehicle found for this tenant.",

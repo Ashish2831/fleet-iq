@@ -11,8 +11,12 @@ from django.utils.dateparse import parse_datetime
 from apps.api.permissions import WRITE_ROLES, _roles
 from apps.common.errors import Forbidden, NotFound, Unavailable
 from apps.common.queries import delayed_shipments, delayed_vehicle_ids
-from apps.fleet.models import Driver, Vehicle, VehicleAssignment
-from apps.routing.models import Route
+from apps.common.repositories import (
+    DriverRepository,
+    RouteRepository,
+    VehicleAssignmentRepository,
+    VehicleRepository,
+)
 from apps.tracking.geo import haversine_m
 from apps.tracking import redis_state as rs
 
@@ -46,7 +50,7 @@ def ingest_location(*, user, payload: dict) -> dict:
     if recorded_at - now > timedelta(seconds=30):
         raise ValueError("recorded_at is too far in the future")
 
-    vehicle = Vehicle.objects.for_tenant(tenant).filter(id=vehicle_id, deleted_at__isnull=True).first()
+    vehicle = VehicleRepository(tenant).get(vehicle_id)
     if not vehicle:
         raise NotFound("Vehicle not found")
 
@@ -54,9 +58,9 @@ def ingest_location(*, user, payload: dict) -> dict:
     if roles & WRITE_ROLES:
         pass
     elif "driver" in roles:
-        driver = Driver.objects.for_tenant(tenant).filter(user=user).first()
+        driver = DriverRepository(tenant).for_user(user)
         assigned = (
-            VehicleAssignment.objects.filter(vehicle=vehicle, driver=driver, ends_at__isnull=True).exists()
+            VehicleAssignmentRepository(tenant).is_assigned(vehicle=vehicle, driver=driver)
             if driver
             else False
         )
@@ -79,16 +83,8 @@ def ingest_location(*, user, payload: dict) -> dict:
         if not rs.ingest_event_id(tenant, event_id):
             return {"accepted": True, "duplicate": True}
 
-        assignment = (
-            VehicleAssignment.objects.select_related("driver")
-            .filter(vehicle=vehicle, ends_at__isnull=True)
-            .first()
-        )
-        route = (
-            Route.objects.for_tenant(tenant)
-            .filter(assignment__vehicle=vehicle, status=Route.Status.IN_PROGRESS)
-            .first()
-        )
+        assignment = VehicleAssignmentRepository(tenant).active_for_vehicle(vehicle)
+        route = RouteRepository(tenant).in_progress_for_vehicle(vehicle)
         speed = float(payload.get("speed_kmh") or 0)
         status = rs.derive_status(speed_kmh=speed, on_route=bool(route))
         live = rs.write_live(

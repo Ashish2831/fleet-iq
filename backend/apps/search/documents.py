@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from django.utils import timezone as dj_tz
 
 from apps.common.queries import delayed_shipments
-from apps.fleet.models import Driver, VehicleAssignment
-from apps.routing.models import Route
+from apps.common.repositories import VehicleAssignmentRepository
+from apps.fleet.models import Driver
 from apps.shipments.models import Shipment
 
 
@@ -71,14 +71,12 @@ def shipment_document(shipment: Shipment) -> dict:
 
 
 def driver_document(driver: Driver, *, lat=None, lng=None) -> dict:
-    has_vehicle = VehicleAssignment.objects.filter(driver=driver, ends_at__isnull=True).exists()
+    asg_repo = VehicleAssignmentRepository(driver.tenant)
+    active = asg_repo.qs().filter(driver=driver, ends_at__isnull=True)
+    has_vehicle = active.exists()
     if lat is None:
         lat, lng = driver.home_lat, driver.home_lng
-        asg = (
-            VehicleAssignment.objects.filter(driver=driver, ends_at__isnull=True)
-            .select_related("vehicle")
-            .first()
-        )
+        asg = active.select_related("vehicle").first()
         if asg:
             try:
                 from apps.tracking.services import live_for_vehicle
@@ -93,11 +91,7 @@ def driver_document(driver: Driver, *, lat=None, lng=None) -> dict:
         loc = {"lat": float(lat), "lon": float(lng)}
     vtypes = []
     if has_vehicle:
-        vtypes = list(
-            VehicleAssignment.objects.filter(driver=driver, ends_at__isnull=True).values_list(
-                "vehicle__vehicle_type__name", flat=True
-            )
-        )
+        vtypes = list(active.values_list("vehicle__vehicle_type__name", flat=True))
     search_all = " ".join(filter(None, [driver.full_name, driver.employee_code, *list(driver.skills or [])]))
     return {
         "tenant_id": str(driver.tenant_id),
@@ -115,10 +109,11 @@ def driver_document(driver: Driver, *, lat=None, lng=None) -> dict:
 
 
 def shipments_for_route(route_id) -> list[Shipment]:
+    # ID-keyed (no tenant in event payload path) — still goes through model manager.
     return list(
-        Shipment.objects.filter(deliveries__route_stop__route_id=route_id).distinct().select_related(
-            "delivery_address", "warehouse"
-        )
+        Shipment.objects.filter(deliveries__route_stop__route_id=route_id)
+        .distinct()
+        .select_related("delivery_address", "warehouse")
     )
 
 

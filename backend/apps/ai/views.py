@@ -5,6 +5,7 @@ from apps.ai.gateway import serialize_run, start_run
 from apps.ai.models import AiRun
 from apps.api.permissions import CanWriteOps, IsTenantAuthenticated
 from apps.common.errors import BadRequest, NotFound
+from apps.common.sanitize import sanitize_text
 
 
 @api_view(["GET", "POST"])
@@ -14,11 +15,14 @@ def ai_runs(request):
     if request.method == "GET":
         rows = AiRun.objects.for_tenant(tenant).order_by("-created_at")[:50]
         return Response([serialize_run(r) for r in rows])
-    agent = request.data.get("agent") or "operations"
-    question = request.data.get("input") or request.data.get("question") or ""
-    if not str(question).strip():
+    agent = sanitize_text(request.data.get("agent") or "operations", max_len=64)
+    question = sanitize_text(
+        request.data.get("input") or request.data.get("question") or "",
+        max_len=4000,
+    )
+    if not question.strip():
         raise BadRequest("input is required")
-    run = start_run(tenant=tenant, user=request.user, agent=agent, question=str(question))
+    run = start_run(tenant=tenant, user=request.user, agent=agent, question=question)
     return Response(serialize_run(run), status=201)
 
 

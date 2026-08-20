@@ -96,10 +96,14 @@ services:
   core:
     profiles: ["dist"]
     build: .
-    environment:
+    environment: &django_db
       FLEETIQ_ROLE: core
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
+      POSTGRES_DB: fleetiq
+      POSTGRES_USER: fleetiq
+      POSTGRES_PASSWORD: fleetiq
+      JWT_SECRET: dev-only-change-me-please-use-32b+
       REDIS_URL: redis://redis:6379/0
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
     ports:
@@ -115,12 +119,10 @@ services:
     profiles: ["dist"]
     build: .
     environment:
+      <<: *django_db
       FLEETIQ_ROLE: tracking
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      REDIS_URL: redis://redis:6379/0
       MONGO_URI: mongodb://mongo:27017
-      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      MONGO_ENABLED: "true"
     ports:
       - "8001:8000"
     command: daphne -b 0.0.0.0 -p 8000 config.asgi_tracking:application
@@ -133,10 +135,9 @@ services:
     profiles: ["dist"]
     build: .
     environment:
+      <<: *django_db
       FLEETIQ_ROLE: ai
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      REDIS_URL: redis://redis:6379/0
+      CORE_API_URL: http://core:8000
     ports:
       - "8002:8000"
     command: daphne -b 0.0.0.0 -p 8000 config.asgi_core:application
@@ -147,9 +148,8 @@ services:
     profiles: ["dist"]
     build: .
     environment:
+      <<: *django_db
       FLEETIQ_ROLE: analytics
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
     ports:
       - "8003:8000"
     command: daphne -b 0.0.0.0 -p 8000 config.asgi_core:application
@@ -160,9 +160,13 @@ services:
     profiles: ["dist"]
     build: .
     environment:
+      <<: *django_db
       FLEETIQ_ROLE: gateway
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
+      GATEWAY_HTTP: "true"
+      CORE_GRAPHQL_URL: http://core:8000/graphql
+      TRACKING_GRAPHQL_URL: http://tracking:8000/graphql
+      AI_GRAPHQL_URL: http://ai:8000/graphql
+      ANALYTICS_GRAPHQL_URL: http://analytics:8000/graphql
     ports:
       - "4000:8000"
     command: daphne -b 0.0.0.0 -p 8000 config.asgi_core:application
@@ -172,8 +176,26 @@ services:
       - ai
       - analytics
 
+  shell:
+    profiles: ["dist"]
+    image: node:22-alpine
+    working_dir: /app
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+    command: sh -c "npm install && npm run dev -- --hostname 0.0.0.0 --port 3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_GRAPHQL_URL: http://localhost:4000/graphql
+      NEXT_PUBLIC_TRACKING_WS: ws://localhost:8001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - gateway
+
 volumes:
   fleetiq_pgdata:
   fleetiq_redpanda:
   fleetiq_mongo:
   fleetiq_es:
+  web_node_modules:

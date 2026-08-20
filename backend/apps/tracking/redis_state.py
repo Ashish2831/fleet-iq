@@ -107,13 +107,11 @@ def ingest_event_id(tenant, event_id: str) -> bool:
 
 
 def rate_limit_gps(tenant, vehicle_id) -> bool:
-    """True if this write is allowed (first in the 1s window)."""
-    key = f"rl:gps:{_tid(tenant)}:{vehicle_id}"
-    r = get_redis()
-    n = r.incr(key)
-    if n == 1:
-        r.expire(key, 1)
-    return n == 1
+    """True if this write is allowed (first in the 1s window). Uses RateLimitStore strategy."""
+    from apps.common.patterns.rate_limit import RedisRateLimitStore, allow_request
+
+    key = f"gps:{_tid(tenant)}:{vehicle_id}"
+    return allow_request(RedisRateLimitStore(), key, limit=1, window_seconds=1)
 
 
 def write_live(tenant, vehicle_id: str, payload: dict) -> dict:

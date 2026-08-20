@@ -61,15 +61,63 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://localhost:3002",
+    "http://127.0.0.1:3002",
+    "http://localhost:4000",
+    "http://127.0.0.1:4000",
+]
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["apps.api.authentication.JWTAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["apps.api.permissions.IsTenantAuthenticated"],
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
+    "DEFAULT_PAGINATION_CLASS": "apps.common.pagination.StandardLimitOffsetPagination",
     "PAGE_SIZE": 25,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "apps.api.exceptions.exception_handler",
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
     "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "300/min", "gps": "30/min"},
+}
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "request_context": {
+            "()": "apps.common.logging.RequestContextFilter",
+        }
+    },
+    "formatters": {
+        "json": {
+            "()": "apps.common.logging.JsonFormatter",
+        },
+        "simple": {
+            "format": "%(levelname)s %(name)s %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "filters": ["request_context"],
+            "formatter": "json" if os.environ.get("LOG_FORMAT", "json") == "json" else "simple",
+        }
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": os.environ.get("LOG_LEVEL", "INFO"),
+    },
+    "loggers": {
+        "django.request": {"level": "WARNING", "propagate": True},
+        "apps": {"level": os.environ.get("LOG_LEVEL", "INFO"), "propagate": True},
+    },
 }
 
 SPECTACULAR_SETTINGS = {
@@ -86,6 +134,9 @@ CORE_GRAPHQL_URL = os.environ.get("CORE_GRAPHQL_URL", "http://127.0.0.1:8000/gra
 TRACKING_GRAPHQL_URL = os.environ.get("TRACKING_GRAPHQL_URL", "http://127.0.0.1:8001/graphql")
 AI_GRAPHQL_URL = os.environ.get("AI_GRAPHQL_URL", "http://127.0.0.1:8002/graphql")
 ANALYTICS_GRAPHQL_URL = os.environ.get("ANALYTICS_GRAPHQL_URL", "http://127.0.0.1:8003/graphql")
+GATEWAY_HTTP = os.environ.get("GATEWAY_HTTP", "false").lower() == "true"
+CORE_API_URL = os.environ.get("CORE_API_URL", "")
+TRACKING_API_URL = os.environ.get("TRACKING_API_URL", "")
 
 ROOT_URLCONF = {
     "all": "config.urls",
@@ -109,6 +160,10 @@ DATABASES = {
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "fleetiq"),
         "HOST": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
         "PORT": os.environ.get("POSTGRES_PORT", "5434"),
+        "CONN_MAX_AGE": int(os.environ.get("POSTGRES_CONN_MAX_AGE", "60")),
+        "OPTIONS": {
+            "connect_timeout": int(os.environ.get("POSTGRES_CONNECT_TIMEOUT", "5")),
+        },
     }
 }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from apps.common.repositories import DriverRepository, RouteRepository, ShipmentRepository
 from apps.dispatch.constraints import (
     current_assignment,
     estimate_eta_min,
@@ -12,27 +13,17 @@ from apps.dispatch.scoring import score_candidate
 from apps.fleet.models import Driver
 from apps.routing.models import Route
 from apps.search.query import search_drivers
-from apps.shipments.models import Shipment
 
 
 def destination_for_order(order):
-    ship = (
-        Shipment.objects.for_tenant(order.tenant)
-        .filter(shipment_items__order_item__order=order)
-        .select_related("delivery_address")
-        .first()
-    )
+    ship = ShipmentRepository(order.tenant).for_order(order.id)
     if ship:
         return ship.delivery_address
     return None
 
 
 def active_route_for_driver(driver: Driver) -> Route | None:
-    return (
-        Route.objects.for_tenant(driver.tenant)
-        .filter(assignment__driver=driver, status__in=[Route.Status.ASSIGNED, Route.Status.IN_PROGRESS])
-        .first()
-    )
+    return RouteRepository(driver.tenant).active_for_driver(driver)
 
 
 def candidate_drivers(order, dest, limit: int = 20) -> list[Driver]:
@@ -51,7 +42,7 @@ def candidate_drivers(order, dest, limit: int = 20) -> list[Driver]:
         ids = [h["driver_id"] for h in result.get("hits") or []]
     except Exception:
         ids = []
-    qs = Driver.objects.for_tenant(order.tenant).filter(deleted_at__isnull=True)
+    qs = DriverRepository(order.tenant).qs()
     if ids:
         found = list(qs.filter(id__in=ids))
         if found:

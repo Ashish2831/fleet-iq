@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { rest } from "@/lib/api";
+import { rest, sanitizeText, useDeferredQuery } from "@/lib/api";
 
 type Source = { title?: string; heading?: string; source?: string; page?: number };
 type Run = {
@@ -30,7 +30,7 @@ const PROMPTS = [
 ];
 
 export default function AIAssistantPage() {
-  const [q, setQ] = useState(PROMPTS[0]);
+  const { query: q, deferredQuery, setQuery, isPending } = useDeferredQuery(PROMPTS[0]);
   const [run, setRun] = useState<Run | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -41,11 +41,12 @@ export default function AIAssistantPage() {
     try {
       const data = await rest<Run>("/api/v1/ai/runs", {
         method: "POST",
-        body: JSON.stringify({ agent: "operations", input: q }),
+        dedupe: false,
+        body: JSON.stringify({ agent: "operations", input: deferredQuery || q }),
       });
       setRun(data);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "Request failed");
+      setErr(sanitizeText(e instanceof Error ? e.message : "Request failed", 200));
     } finally {
       setBusy(false);
     }
@@ -60,14 +61,19 @@ export default function AIAssistantPage() {
         Operations agent. Numbers come from tools (Postgres, Redis, Mongo, ES). Mutations create a DispatchProposal.
       </p>
       <div style={{ display: "flex", gap: 8, margin: "16px 0", flexWrap: "wrap" }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 360, padding: "8px 10px" }} />
+        <input
+          value={q}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ minWidth: 360, padding: "8px 10px" }}
+          aria-busy={isPending}
+        />
         <button className="ghost" type="button" onClick={ask} disabled={busy}>
           {busy ? "Running…" : "Ask"}
         </button>
       </div>
       <p className="muted">
         {PROMPTS.map((p) => (
-          <button key={p} className="ghost" type="button" style={{ marginRight: 8 }} onClick={() => setQ(p)}>
+          <button key={p} className="ghost" type="button" style={{ marginRight: 8 }} onClick={() => setQuery(p)}>
             {p}
           </button>
         ))}
@@ -79,30 +85,34 @@ export default function AIAssistantPage() {
             <b>{out.delayed_count ?? "—"}</b>
             <span> delayed (from tools)</span>
           </p>
-          <p>{out.summary}</p>
-          {out.clusters?.length ? <p className="muted">Clusters: {out.clusters.join(", ")}</p> : null}
-          {out.root_causes?.length ? <p className="muted">Causes: {out.root_causes.join(", ")}</p> : null}
-          {out.recommended_actions?.length ? (
+          {out.summary ? <p>{sanitizeText(out.summary, 800)}</p> : null}
+          {(out.root_causes || []).length ? (
             <ul>
-              {out.recommended_actions.map((a) => (
-                <li key={a}>{a}</li>
+              {out.root_causes!.map((c) => (
+                <li key={c}>{sanitizeText(c, 200)}</li>
               ))}
             </ul>
           ) : null}
-          <p className="muted">
-            Sources:{" "}
-            {(out.sources || []).map((s) => (
-              <span key={`${s.source}-${s.page}`} className="ghost" style={{ marginRight: 8, padding: "2px 8px" }}>
-                {s.title || s.source} {s.page ? `p.${s.page}` : ""}
-              </span>
-            ))}
-          </p>
+          {(out.recommended_actions || []).length ? (
+            <ul>
+              {out.recommended_actions!.map((a) => (
+                <li key={a}>{sanitizeText(a, 200)}</li>
+              ))}
+            </ul>
+          ) : null}
+          {(out.sources || []).map((s, i) => (
+            <p key={i} className="muted">
+              {sanitizeText(s.title, 120)} · {sanitizeText(s.heading, 120)} · {sanitizeText(s.source, 64)}
+            </p>
+          ))}
           {run.proposal_id ? (
             <p>
-              <Link href="/dispatch">Open dispatch proposal {run.proposal_id}</Link>
+              <Link href="/dispatch">Open dispatch proposal {sanitizeText(run.proposal_id, 64)}</Link>
             </p>
           ) : null}
-          <p className="muted">Tools: {(run.trace || []).map((t) => t.tool).filter(Boolean).join(" → ")}</p>
+          <p className="muted">
+            Tools: {(run.trace || []).map((t) => sanitizeText(t.tool, 64)).filter(Boolean).join(" → ")}
+          </p>
         </div>
       ) : null}
     </>

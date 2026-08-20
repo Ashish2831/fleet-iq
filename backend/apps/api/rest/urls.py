@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from apps.api.jwks import jwks
 from apps.api.rest import analytics as analytics_views
+from apps.api.rest import batch as batch_views
 from apps.api.rest import internal as internal_views
 from apps.api.rest import views
 from apps.ai import views as ai_views
@@ -28,6 +29,7 @@ auth_urls = [
     path("auth/refresh", views.refresh),
     path("auth/jwks", jwks),
     path("me", views.me),
+    path("batch", batch_views.batch),
 ]
 
 core_urls = auth_urls + [

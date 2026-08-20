@@ -16,9 +16,19 @@ from apps.catalog.models import Customer as CustomerModel
 from apps.catalog.models import Warehouse as WarehouseModel
 from apps.common.errors import ApiError
 from apps.common.queries import delayed_shipments
+from apps.common.repositories import (
+    DispatchProposalRepository,
+    DriverRepository,
+    OrderRepository,
+    RouteRepository,
+    ShipmentRepository,
+    VehicleAssignmentRepository,
+    VehicleRepository,
+)
+from apps.common.sanitize import sanitize_text
+from apps.common.utils import clamp
 from apps.fleet.models import Driver as DriverModel
 from apps.fleet.models import Vehicle as VehicleModel
-from apps.fleet.models import VehicleAssignment
 from apps.identity.models import User as UserModel
 from apps.orders.models import Order as OrderModel
 from apps.orders.services import confirm_order
@@ -27,7 +37,6 @@ from apps.routing.services import assign_route
 from apps.shipments.models import Shipment as ShipmentModel
 from apps.ai.gateway import serialize_run, start_run
 from apps.ai.models import AiRun as AiRunModel
-from apps.dispatch.models import DispatchProposal as DispatchProposalModel
 from apps.dispatch.services import approve as approve_dispatch
 from apps.dispatch.services import reject as reject_dispatch
 from apps.search.query import search_drivers, search_knowledge, search_shipments
@@ -43,6 +52,10 @@ def _user(info: strawberry.Info) -> UserModel:
 
 def _gql(exc: ApiError):
     raise GraphQLError(exc.detail, extensions={"code": exc.code}) from exc
+
+
+def _clean(value: str | None, max_len: int = 128) -> str:
+    return sanitize_text(value or "", max_len=max_len)
 
 
 @strawberry.type
@@ -354,12 +367,16 @@ class DashboardRoute:
 
 
 @strawberry.type
-class Dashboard:
+class CoreDashboard:
     active_vehicles: int
     active_drivers: int
     delayed_deliveries: int
     in_transit_shipments: int
     routes: list[DashboardRoute]
+
+
+@strawberry.type
+class Dashboard(CoreDashboard):
     sla_yesterday: Optional[float] = None
     orders_yesterday: int = 0
 
@@ -417,6 +434,27 @@ def _vehicle_type(obj: VehicleModel) -> VehicleGql:
     )
 
 
+@strawberry.type(name="Vehicle")
+class CoreVehicle:
+    id: strawberry.ID
+    plate_number: str
+    status: str
+    make: str
+    model: str
+    vehicle_type_name: str
+
+
+def _core_vehicle_type(obj: VehicleModel) -> CoreVehicle:
+    return CoreVehicle(
+        id=str(obj.id),
+        plate_number=obj.plate_number,
+        status=obj.status,
+        make=obj.make or "",
+        model=obj.model or "",
+        vehicle_type_name=obj.vehicle_type.name if getattr(obj, "vehicle_type", None) else "",
+    )
+
+
 def _route_type(obj: RouteModel) -> RouteType:
     return RouteType(
         id=str(obj.id),
@@ -443,76 +481,95 @@ class IdentityQuery:
         return await sync_to_async(inner)()
 
 
+def _dashboard_kwargs(tenant, now=None, today=None) -> dict:
+    now = now or timezone.now()
+    today = today or timezone.localdate()
+    vehicles = VehicleRepository(tenant)
+    drivers = DriverRepository(tenant)
+    shipments = ShipmentRepository(tenant)
+    routes_repo = RouteRepository(tenant)
+    active_vehicles = vehicles.qs().filter(status__in=["active", "in_use"]).count()
+    active_drivers = drivers.qs().filter(status=DriverModel.Status.AVAILABLE).count()
+    delayed = delayed_shipments(tenant, now=now).count()
+    in_transit = shipments.tenant_qs().filter(status="in_transit").count()
+    routes_qs = (
+        routes_repo.qs()
+        .filter(planned_date=today)
+        .annotate(
+            stop_count=Count("stops"),
+            completed_stops=Count("stops", filter=Q(stops__status="completed")),
+            eta=Max("stops__planned_arrival", filter=~Q(stops__status="completed")),
+        )
+    )
+    routes = []
+    for r in routes_qs:
+        try:
+            assignment = r.assignment
+        except ObjectDoesNotExist:
+            assignment = None
+        routes.append(
+            DashboardRoute(
+                id=str(r.id),
+                route_number=r.route_number,
+                status=r.status,
+                driver_name=assignment.driver.full_name if assignment else None,
+                vehicle_plate=assignment.vehicle.plate_number if assignment else None,
+                stop_count=r.stop_count,
+                completed_stops=r.completed_stops,
+                eta=r.eta,
+            )
+        )
+    from apps.events.kpis import tenant_kpis
+
+    kpis = tenant_kpis(tenant)
+    return dict(
+        active_vehicles=active_vehicles,
+        active_drivers=active_drivers,
+        delayed_deliveries=delayed,
+        in_transit_shipments=in_transit,
+        routes=routes,
+        sla_yesterday=kpis.get("sla_yesterday"),
+        orders_yesterday=kpis.get("orders_yesterday") or 0,
+    )
+
+
+@strawberry.type
+class CoreDashboardQuery:
+    @strawberry.field
+    async def dashboard(self, info: strawberry.Info) -> CoreDashboard:
+        user = _user(info)
+        tenant = user.tenant
+
+        def inner() -> CoreDashboard:
+            kw = _dashboard_kwargs(tenant)
+            kw.pop("sla_yesterday", None)
+            kw.pop("orders_yesterday", None)
+            return CoreDashboard(**kw)
+
+        return await sync_to_async(inner)()
+
+
 @strawberry.type
 class DashboardQuery:
     @strawberry.field
     async def dashboard(self, info: strawberry.Info) -> Dashboard:
         user = _user(info)
         tenant = user.tenant
-        now = timezone.now()
-        today = timezone.localdate()
 
         def inner() -> Dashboard:
-            active_vehicles = VehicleModel.objects.for_tenant(tenant).filter(
-                deleted_at__isnull=True, status__in=["active", "in_use"]
-            ).count()
-            active_drivers = DriverModel.objects.for_tenant(tenant).filter(
-                deleted_at__isnull=True, status=DriverModel.Status.AVAILABLE
-            ).count()
-            delayed = delayed_shipments(tenant, now=now).count()
-            in_transit = ShipmentModel.objects.for_tenant(tenant).filter(status="in_transit").count()
-            routes_qs = (
-                RouteModel.objects.for_tenant(tenant)
-                .filter(planned_date=today)
-                .select_related("assignment__driver", "assignment__vehicle")
-                .annotate(
-                    stop_count=Count("stops"),
-                    completed_stops=Count("stops", filter=Q(stops__status="completed")),
-                    eta=Max("stops__planned_arrival", filter=~Q(stops__status="completed")),
-                )
-            )
-            routes = []
-            for r in routes_qs:
-                try:
-                    assignment = r.assignment
-                except ObjectDoesNotExist:
-                    assignment = None
-                routes.append(
-                    DashboardRoute(
-                        id=str(r.id),
-                        route_number=r.route_number,
-                        status=r.status,
-                        driver_name=assignment.driver.full_name if assignment else None,
-                        vehicle_plate=assignment.vehicle.plate_number if assignment else None,
-                        stop_count=r.stop_count,
-                        completed_stops=r.completed_stops,
-                        eta=r.eta,
-                    )
-                )
-            from apps.events.kpis import tenant_kpis
-
-            kpis = tenant_kpis(tenant)
-            return Dashboard(
-                active_vehicles=active_vehicles,
-                active_drivers=active_drivers,
-                delayed_deliveries=delayed,
-                in_transit_shipments=in_transit,
-                routes=routes,
-                sla_yesterday=kpis.get("sla_yesterday"),
-                orders_yesterday=kpis.get("orders_yesterday") or 0,
-            )
+            return Dashboard(**_dashboard_kwargs(tenant))
 
         return await sync_to_async(inner)()
 
 
 @strawberry.type
-class FleetQuery:
+class DriverQuery:
     @strawberry.field
     async def driver(self, info: strawberry.Info, id: strawberry.ID) -> Optional[DriverType]:
         _user(info)
 
         def inner():
-            row = DriverModel.objects.for_tenant(info.context.tenant).filter(id=id).first()
+            row = DriverRepository(info.context.tenant).get(id)
             return _driver_type(row) if row else None
 
         return await sync_to_async(inner)()
@@ -529,30 +586,29 @@ class FleetQuery:
         _user(info)
 
         def inner():
-            qs = DriverModel.objects.for_tenant(info.context.tenant).filter(deleted_at__isnull=True)
+            qs = DriverRepository(info.context.tenant).qs()
             if status:
-                qs = qs.filter(status=status)
+                qs = qs.filter(status=_clean(status, 32))
             if has_vehicle is True:
-                assigned = VehicleAssignment.objects.filter(ends_at__isnull=True).values("driver_id")
+                assigned = VehicleAssignmentRepository(info.context.tenant).active_driver_ids()
                 qs = qs.filter(id__in=assigned)
             elif has_vehicle is False:
-                assigned = VehicleAssignment.objects.filter(ends_at__isnull=True).values("driver_id")
+                assigned = VehicleAssignmentRepository(info.context.tenant).active_driver_ids()
                 qs = qs.exclude(id__in=assigned)
-            return [_driver_type(d) for d in qs.order_by("employee_code")[:first]]
+            limit = int(clamp(first, 1, 100))
+            return [_driver_type(d) for d in qs.order_by("employee_code")[:limit]]
 
         return await sync_to_async(inner)()
 
+
+@strawberry.type
+class FleetQuery(DriverQuery):
     @strawberry.field
     async def vehicle(self, info: strawberry.Info, id: strawberry.ID) -> Optional[VehicleGql]:
         _user(info)
 
         def inner():
-            row = (
-                VehicleModel.objects.select_related("vehicle_type")
-                .for_tenant(info.context.tenant)
-                .filter(id=id)
-                .first()
-            )
+            row = VehicleRepository(info.context.tenant).get(id)
             return _vehicle_type(row) if row else None
 
         return await sync_to_async(inner)()
@@ -562,12 +618,37 @@ class FleetQuery:
         _user(info)
 
         def inner():
-            qs = VehicleModel.objects.select_related("vehicle_type").for_tenant(info.context.tenant).filter(
-                deleted_at__isnull=True
-            )
+            qs = VehicleRepository(info.context.tenant).qs()
             if status:
-                qs = qs.filter(status=status)
-            return [_vehicle_type(v) for v in qs.order_by("plate_number")[:first]]
+                qs = qs.filter(status=_clean(status, 32))
+            limit = int(clamp(first, 1, 100))
+            return [_vehicle_type(v) for v in qs.order_by("plate_number")[:limit]]
+
+        return await sync_to_async(inner)()
+
+
+@strawberry.type
+class CoreFleetQuery(DriverQuery):
+    @strawberry.field
+    async def vehicle(self, info: strawberry.Info, id: strawberry.ID) -> Optional[CoreVehicle]:
+        _user(info)
+
+        def inner():
+            row = VehicleRepository(info.context.tenant).get(id)
+            return _core_vehicle_type(row) if row else None
+
+        return await sync_to_async(inner)()
+
+    @strawberry.field
+    async def vehicles(self, info: strawberry.Info, status: Optional[str] = None, first: int = 20) -> list[CoreVehicle]:
+        _user(info)
+
+        def inner():
+            qs = VehicleRepository(info.context.tenant).qs()
+            if status:
+                qs = qs.filter(status=_clean(status, 32))
+            limit = int(clamp(first, 1, 100))
+            return [_core_vehicle_type(v) for v in qs.order_by("plate_number")[:limit]]
 
         return await sync_to_async(inner)()
 
@@ -579,7 +660,7 @@ class OrderQuery:
         _user(info)
 
         def inner():
-            row = OrderModel.objects.for_tenant(info.context.tenant).filter(id=id).first()
+            row = OrderRepository(info.context.tenant).get(id)
             return _order_type(row) if row else None
 
         return await sync_to_async(inner)()
@@ -589,10 +670,11 @@ class OrderQuery:
         _user(info)
 
         def inner():
-            qs = OrderModel.objects.for_tenant(info.context.tenant)
+            qs = OrderRepository(info.context.tenant).qs()
             if status:
-                qs = qs.filter(status=status)
-            return [_order_type(o) for o in qs.order_by("-created_at")[:first]]
+                qs = qs.filter(status=_clean(status, 32))
+            limit = int(clamp(first, 1, 100))
+            return [_order_type(o) for o in qs.order_by("-created_at")[:limit]]
 
         return await sync_to_async(inner)()
 
@@ -601,7 +683,7 @@ class OrderQuery:
         _user(info)
 
         def inner():
-            row = ShipmentModel.objects.for_tenant(info.context.tenant).filter(id=id).first()
+            row = ShipmentRepository(info.context.tenant).get(id)
             if not row:
                 return None
             return ShipmentType(
@@ -624,13 +706,13 @@ class OrderQuery:
         _user(info)
 
         def inner():
-            qs = ShipmentModel.objects.select_related("delivery_address").for_tenant(info.context.tenant)
+            qs = ShipmentRepository(info.context.tenant).qs()
             if status:
-                qs = qs.filter(status=status)
+                qs = qs.filter(status=_clean(status, 32))
             if delayed:
                 qs = delayed_shipments(info.context.tenant)
             if city:
-                qs = qs.filter(delivery_address__city__iexact=city)
+                qs = qs.filter(delivery_address__city__iexact=_clean(city, 64))
             return [
                 ShipmentType(
                     id=str(s.id),
@@ -651,7 +733,7 @@ class RoutingQuery:
         _user(info)
 
         def inner():
-            row = RouteModel.objects.for_tenant(info.context.tenant).filter(id=id).first()
+            row = RouteRepository(info.context.tenant).get(id)
             return _route_type(row) if row else None
 
         return await sync_to_async(inner)()
@@ -663,11 +745,11 @@ class RoutingQuery:
         _user(info)
 
         def inner():
-            qs = RouteModel.objects.for_tenant(info.context.tenant)
+            qs = RouteRepository(info.context.tenant).qs()
             if date:
                 qs = qs.filter(planned_date=date)
             if status:
-                qs = qs.filter(status=status)
+                qs = qs.filter(status=_clean(status, 32))
             return [_route_type(r) for r in qs.order_by("route_number")[:50]]
 
         return await sync_to_async(inner)()
@@ -729,10 +811,10 @@ class SearchQuery:
         def inner():
             result = search_shipments(
                 tenant_id=user.tenant_id,
-                q=q or "",
+                q=_clean(q, 200),
                 delayed=delayed,
-                city=city,
-                status=status,
+                city=_clean(city, 64) if city else None,
+                status=_clean(status, 32) if status else None,
             )
             hits = [
                 ShipmentSearchHit(
@@ -772,8 +854,8 @@ class SearchQuery:
         def inner():
             result = search_drivers(
                 tenant_id=user.tenant_id,
-                q=q or "",
-                skills=skills,
+                q=_clean(q, 200),
+                skills=[_clean(s, 64) for s in (skills or [])] or None,
                 available=available,
                 lat=lat,
                 lng=lng,
@@ -800,7 +882,11 @@ class SearchQuery:
         user = _user(info)
 
         def inner():
-            result = search_knowledge(tenant_id=user.tenant_id, q=q, doc_type=doc_type)
+            result = search_knowledge(
+                tenant_id=user.tenant_id,
+                q=_clean(q, 400),
+                doc_type=_clean(doc_type, 64) if doc_type else None,
+            )
             return [
                 KnowledgeHit(
                     text=h.get("text") or "",
@@ -850,7 +936,7 @@ class DispatchQuery:
         user = _user(info)
 
         def inner():
-            qs = DispatchProposalModel.objects.for_tenant(user.tenant).select_related("order")
+            qs = DispatchProposalRepository(user.tenant).qs()
             if status:
                 qs = qs.filter(status=status)
             return [_proposal_type(p) for p in qs.order_by("-created_at")[:50]]
@@ -910,12 +996,17 @@ class AiQuery:
 
 
 @strawberry.type
+class CoreQuery(IdentityQuery, CoreDashboardQuery, CoreFleetQuery, OrderQuery, RoutingQuery, SearchQuery, DispatchQuery):
+    pass
+
+
+@strawberry.type
 class Query(IdentityQuery, DashboardQuery, FleetQuery, OrderQuery, RoutingQuery, SearchQuery, DispatchQuery, AiQuery):
     pass
 
 
 @strawberry.type
-class Mutation:
+class CoreMutation:
     @strawberry.mutation
     async def confirm_order(self, info: strawberry.Info, id: strawberry.ID) -> OrderType:
         def inner():
@@ -966,20 +1057,6 @@ class Mutation:
         return await sync_to_async(inner)()
 
     @strawberry.mutation
-    async def start_ai_run(self, info: strawberry.Info, agent: str, input: str) -> AiRunType:
-        def inner():
-            user = _user(info)
-            if not (_roles(user) & WRITE_ROLES):
-                raise GraphQLError("Forbidden", extensions={"code": "FORBIDDEN"})
-            try:
-                run = start_run(tenant=user.tenant, user=user, agent=agent, question=input)
-            except ApiError as exc:
-                _gql(exc)
-            return _ai_run_type(run)
-
-        return await sync_to_async(inner)()
-
-    @strawberry.mutation
     async def reject_dispatch(self, info: strawberry.Info, id: strawberry.ID) -> DispatchProposalType:
         def inner():
             user = _user(info)
@@ -992,3 +1069,26 @@ class Mutation:
             return _proposal_type(proposal)
 
         return await sync_to_async(inner)()
+
+
+@strawberry.type
+class Mutation(CoreMutation):
+    @strawberry.mutation
+    async def start_ai_run(self, info: strawberry.Info, agent: str, input: str) -> AiRunType:
+        def inner():
+            user = _user(info)
+            if not (_roles(user) & WRITE_ROLES):
+                raise GraphQLError("Forbidden", extensions={"code": "FORBIDDEN"})
+            try:
+                run = start_run(
+                    tenant=user.tenant,
+                    user=user,
+                    agent=_clean(agent, 64),
+                    question=_clean(input, 4000),
+                )
+            except ApiError as exc:
+                _gql(exc)
+            return _ai_run_type(run)
+
+        return await sync_to_async(inner)()
+

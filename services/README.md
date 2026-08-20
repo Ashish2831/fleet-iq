@@ -28,4 +28,8 @@ Compose:
 docker compose --profile dist up --build
 ```
 
-The in-process composer (`apps.api.federation.execute_federated`) is what tests use. Production would replace it with Apollo Router calling subgraph HTTP endpoints. Browser still has **one** GraphQL URL (the gateway). WS stays on Tracking (`NEXT_PUBLIC_TRACKING_WS`).
+Core GraphQL has no `startAiRun`. Core `Vehicle` has no `live`/`track`. Core `dashboard` has no `liveCounts` (Redis) and no `slaYesterday` / `ordersYesterday` (Analytics). The gateway stitches Core SQL KPIs with Tracking live counts and Analytics SLA. Tracking GraphQL has no `orders`. Set `GATEWAY_HTTP=true` so it POSTs to subgraph URLs. Tests use the in-process composer. Browser still has **one** GraphQL URL. WS stays on Tracking (`NEXT_PUBLIC_TRACKING_WS`).
+
+```bash
+./scripts/run-dist.sh
+```

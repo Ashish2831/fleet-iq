@@ -2562,38 +2562,46 @@ async function executeChain(
 ## Implementation Checklist & Summary
 
 ### Critical (Must Have)
-- [ ] Event-Driven Architecture
-- [ ] Repository Pattern
-- [ ] Utility Functions Library
-- [ ] Input Sanitization
-- [ ] CSRF Protection
-- [ ] Rate Limiting
-- [ ] Database Indexing
-- [ ] Pagination
-- [ ] Error Sanitization
-- [ ] Structured Logging
+> **Coverage note (honest):** Domain **services**, REST viewsets, GraphQL dashboard/list/get/search/mutations/loaders, AI graphs/tools/gateway, tracking GPS, dispatch constraints/solver paths, search driver docs, seed catalog/fleet creates, and `common.queries` go through repositories + sanitize. Intentional leftovers: identity/RBAC managers, outbox/KPI rows, AiRun/IdempotencyKey stores, ID-keyed search helpers (`shipments_for_route/order`), join Subqueries (VehicleAssignment/FuelTransaction), and consumer `Tenant.objects` lookups.
+
+- [x] Event-Driven Architecture — Kafka + transactional outbox (`apps.events`) — **platform-wide**
+- [x] Repository Pattern — Order/Vehicle/Driver/Shipment/Delivery/Route/DispatchProposal/VehicleAssignment (+ stops/items); wired through services, GraphQL, REST, AI, tracking, seed
+- [x] Utility Functions Library — `apps.common.utils` (available; not every module imports it yet)
+- [x] Input Sanitization — REST write serializers + domain create/update strings; GraphQL + AI graph inputs sanitized
+- [x] CSRF Protection — middleware + trusted origins; GraphQL Bearer `csrf_exempt`
+- [x] Rate Limiting — DRF throttles + GPS via `RedisRateLimitStore` strategy
+- [x] Database Indexing — domain model indexes
+- [x] Pagination — default DRF `StandardLimitOffsetPagination`
+- [x] Error Sanitization — DRF exception handler
+- [x] Structured Logging — JSON + request/correlation id
 
 ### High Priority (Should Have)
-- [ ] Job Queue System
-- [ ] Batch API
-- [ ] Caching Strategy
-- [ ] Database Aggregation Pipelines
-- [ ] Session Management
-- [ ] API Client Architecture
-- [ ] Standardized API Responses
-- [ ] Connection Pooling
+- [x] Job Queue System — outbox publisher worker + Kafka consumers
+- [x] Batch API — `POST /api/v1/batch` (GET-only, capped, path-guarded)
+- [x] Caching Strategy — Redis live state + Django cache
+- [x] Database Aggregation Pipelines — Mongo minute buckets / ORM aggregates
+- [x] Session Management — JWT access + refresh cookie
+- [x] API Client Architecture — `apps/web/lib/client.ts` (interceptors, dedup, batch)
+- [x] Standardized API Responses — problem+json via `apps.api.exceptions`
+- [x] Connection Pooling — `CONN_MAX_AGE` on Postgres
 
 ### Medium Priority (Nice to Have)
-- [ ] Integration Tests
-- [ ] Type Safety (strict TypeScript)
-- [ ] Modern ES6+ Features
-- [ ] Stateless Design
-- [ ] Background Processing
-- [ ] Custom React Hooks
-- [ ] Request Deduplication
-- [ ] XSS Protection (Client & Server)
-- [ ] SOLID Principles
-- [ ] Design Patterns (Factory, Strategy, Observer, etc.)
+- [x] Integration Tests — `backend/tests/test_phase_*.py` + best-practices tests
+- [x] Type Safety (strict TypeScript) — `apps/web/tsconfig.json` `strict: true`
+- [x] Modern ES6+ Features — modern TS/React 19 client + Python 3.10+ typing
+- [x] Stateless Design — JWT + role processes
+- [x] Background Processing — outbox / consumers / AI runs
+- [x] Custom React Hooks — `useDeferredQuery` / `useRestQuery`
+- [x] Request Deduplication — ApiClient GET/GQL in-flight map
+- [x] XSS Protection (Client & Server) — `sanitize.py` + `lib/sanitize.ts`
+- [x] SOLID Principles — repos, authz strategies, DIP for bus/retry/circuit
+- [x] Design Patterns — Observer, Factory, Strategy (retry/rate-limit/authz/io), Circuit Breaker
+
+### React 19 & App Router (applied)
+- [x] `useTransition` / `useDeferredValue` — search, dispatch, login
+- [x] `useOptimistic` — dispatch approve/reject
+- [x] App Router `loading.tsx` / `error.tsx` / `not-found.tsx`
+- [x] Auth — FleetIQ JWT (Bearer + refresh cookie); NextAuth not used by design
 
 ---
 

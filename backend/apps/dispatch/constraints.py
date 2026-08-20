@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from apps.common.repositories import VehicleAssignmentRepository
 from apps.fleet.models import Driver, Vehicle, VehicleAssignment
 from apps.routing.models import Route
 from apps.telemetry.geo import haversine_m
@@ -23,8 +24,10 @@ def order_weight_kg(order) -> float:
 
 def current_assignment(driver: Driver) -> VehicleAssignment | None:
     return (
-        VehicleAssignment.objects.select_related("vehicle", "vehicle__vehicle_type")
+        VehicleAssignmentRepository(driver.tenant)
+        .qs()
         .filter(driver=driver, ends_at__isnull=True)
+        .select_related("vehicle", "vehicle__vehicle_type")
         .first()
     )
 
@@ -83,7 +86,7 @@ def _origin(vehicle) -> tuple[float | None, float | None]:
     live = live_for_vehicle(vehicle.tenant, str(vehicle.id))
     if live and live.get("lat") is not None:
         return live["lat"], live["lng"]
-    asg = VehicleAssignment.objects.filter(vehicle=vehicle, ends_at__isnull=True).select_related("driver").first()
+    asg = VehicleAssignmentRepository(vehicle.tenant).active_for_vehicle(vehicle)
     if asg and asg.driver.home_lat is not None:
         return asg.driver.home_lat, asg.driver.home_lng
     return None, None

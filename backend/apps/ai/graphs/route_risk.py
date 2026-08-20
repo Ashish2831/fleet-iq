@@ -2,20 +2,24 @@ from __future__ import annotations
 
 from apps.ai.context import ToolContext
 from apps.ai.tools import call_tool
+from apps.common.repositories import RouteRepository
+from apps.common.sanitize import sanitize_text
 from apps.routing.models import Route
 
 
 def run(ctx: ToolContext, question: str) -> dict:
     agent = "route_risk"
+    question = sanitize_text(question, max_len=4000)
     metrics = call_tool(ctx, agent, "get_delivery_metrics", "retrieve")
+    routes = RouteRepository(ctx.tenant)
     route = (
-        Route.objects.for_tenant(ctx.tenant)
+        routes.tenant_qs()
         .filter(status=Route.Status.IN_PROGRESS)
         .order_by("-created_at")
         .first()
     )
     if route is None:
-        route = Route.objects.for_tenant(ctx.tenant).order_by("-created_at").first()
+        route = routes.tenant_qs().order_by("-created_at").first()
     enqueued = None
     if route:
         enqueued = call_tool(

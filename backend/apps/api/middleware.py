@@ -1,6 +1,9 @@
+import logging
 import uuid
 
 from django.utils.deprecation import MiddlewareMixin
+
+logger = logging.getLogger("apps.api.request")
 
 
 class RequestIdMiddleware(MiddlewareMixin):
@@ -11,5 +14,17 @@ class RequestIdMiddleware(MiddlewareMixin):
         set_correlation_id(request.request_id)
 
     def process_response(self, request, response):
-        response["X-Request-ID"] = getattr(request, "request_id", "")
+        rid = getattr(request, "request_id", "")
+        response["X-Request-ID"] = rid
+        if request.path.startswith("/api/") or request.path.startswith("/graphql"):
+            logger.info(
+                "request completed",
+                extra={
+                    "request_id": rid,
+                    "correlation_id": rid,
+                    "method": request.method,
+                    "path": request.path,
+                    "status": getattr(response, "status_code", None),
+                },
+            )
         return response

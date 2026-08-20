@@ -3,9 +3,11 @@ from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 
 from apps.api.permissions import CanAssign, IsTenantAuthenticated
+from apps.common.errors import NotFound
+from apps.common.repositories import DispatchProposalRepository, OrderRepository
+from apps.common.sanitize import sanitize_text
 from apps.dispatch.models import DispatchProposal
 from apps.dispatch.services import approve, propose, reject
-from apps.orders.models import Order
 
 
 class DispatchProposalSerializer(serializers.ModelSerializer):
@@ -35,10 +37,10 @@ class DispatchProposalViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = DispatchProposal.objects.select_related("order")
 
     def get_queryset(self):
-        qs = DispatchProposal.objects.for_tenant(self.request.user.tenant).select_related("order")
+        qs = DispatchProposalRepository(self.request.user.tenant).qs()
         status = self.request.query_params.get("status")
         if status:
-            qs = qs.filter(status=status)
+            qs = qs.filter(status=sanitize_text(status, max_len=32))
         return qs.order_by("-created_at")
 
     @action(detail=True, methods=["post"])
@@ -52,25 +54,10 @@ class DispatchProposalViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(self.get_serializer(proposal).data)
 
 
-class DispatchOrderViewSet(viewsets.ViewSet):
-    permission_classes = [IsTenantAuthenticated, CanAssign]
-
-    @action(detail=True, methods=["post"])
-    def propose(self, request, pk=None):
-        if not Order.objects.for_tenant(request.user.tenant).filter(id=pk).exists():
-            from apps.common.errors import NotFound
-
-            raise NotFound("Order not found")
-        proposal = propose(tenant=request.user.tenant, order_id=pk)
-        return Response(DispatchProposalSerializer(proposal).data)
-
-
 @api_view(["POST"])
 @permission_classes([IsTenantAuthenticated, CanAssign])
 def dispatch_propose(request, pk):
-    if not Order.objects.for_tenant(request.user.tenant).filter(id=pk).exists():
-        from apps.common.errors import NotFound
-
+    if not OrderRepository(request.user.tenant).exists(id=pk):
         raise NotFound("Order not found")
     proposal = propose(tenant=request.user.tenant, order_id=pk)
     return Response(DispatchProposalSerializer(proposal).data)

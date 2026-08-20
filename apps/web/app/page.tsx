@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { gql } from "@/lib/api";
+import { gql, sanitizeText } from "@/lib/api";
 
 type Dash = {
   dashboard: {
@@ -26,7 +26,7 @@ export default function DashboardPage() {
       }
     }`)
       .then((d) => setData(d.dashboard))
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(sanitizeText(e instanceof Error ? e.message : "Failed", 200)));
   }, []);
 
   if (error) return <p className="err">{error}</p>;
@@ -47,9 +47,9 @@ export default function DashboardPage() {
         <tbody>
           {data.routes.map((r) => (
             <tr key={r.id}>
-              <td><Link href={`/routes/${r.id}`}>{r.routeNumber}</Link></td>
-              <td>{r.status}</td>
-              <td>{r.driverName ?? "—"}</td>
+              <td><Link href={`/routes/${r.id}`}>{sanitizeText(r.routeNumber, 64)}</Link></td>
+              <td>{sanitizeText(r.status, 32)}</td>
+              <td>{sanitizeText(r.driverName ?? "—", 64)}</td>
               <td>{r.eta ? new Date(r.eta).toLocaleTimeString() : "—"}</td>
             </tr>
           ))}

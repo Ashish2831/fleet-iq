@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import uuid
 
+from apps.common.repositories import OrderRepository
 from apps.dispatch.services import apply_proposal, build_proposal, should_auto
-from apps.orders.models import Order
 from apps.tracking import redis_state as rs
 
 
@@ -12,7 +12,7 @@ def run_dispatch(tenant, order_id, *, auto: bool = True):
 
     This is the LangGraph-shaped workflow without an LLM in the solve node.
     """
-    order = Order.objects.for_tenant(tenant).filter(id=order_id).first()
+    order = OrderRepository(tenant).get(order_id)
     if not order:
         return None
     token = str(uuid.uuid4())

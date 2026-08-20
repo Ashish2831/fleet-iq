@@ -3,22 +3,17 @@ from rest_framework.response import Response
 
 from apps.api.permissions import IsTenantAuthenticated
 from apps.common.errors import NotFound
-from apps.fleet.models import Vehicle, VehicleAssignment
+from apps.common.repositories import VehicleAssignmentRepository, VehicleRepository
 
 
 @api_view(["GET"])
 @permission_classes([IsTenantAuthenticated])
 def vehicle_assignment(request, pk):
     """Core read for Tracking ingest. Prefer Kafka snapshots in production."""
-    vehicle = Vehicle.objects.for_tenant(request.user.tenant).filter(id=pk, deleted_at__isnull=True).first()
+    vehicle = VehicleRepository(request.user.tenant).get(pk)
     if not vehicle:
         raise NotFound("Vehicle not found")
-    asg = (
-        VehicleAssignment.objects.for_tenant(request.user.tenant)
-        .filter(vehicle=vehicle, ends_at__isnull=True)
-        .select_related("driver")
-        .first()
-    )
+    asg = VehicleAssignmentRepository(request.user.tenant).active_for_vehicle(vehicle)
     return Response(
         {
             "vehicle_id": str(vehicle.id),

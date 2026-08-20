@@ -4,6 +4,8 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.common.errors import Conflict, NotFound
+from apps.common.repositories import DeliveryRepository, ShipmentRepository
+from apps.common.sanitize import sanitize_text
 from apps.events.outbox import enqueue
 from apps.shipments.models import Delivery, Shipment, ShipmentItem
 
@@ -21,11 +23,10 @@ def create_shipment(
 ) -> Shipment:
     """order_item_quantities: list of (OrderItem, quantity)."""
     total = sum((Decimal(str(oi.weight_kg)) * Decimal(str(qty)) for oi, qty in order_item_quantities), Decimal("0"))
-    shipment = Shipment.objects.create(
-        tenant=tenant,
+    shipment = ShipmentRepository(tenant).create(
         warehouse=warehouse,
         delivery_address=delivery_address,
-        shipment_number=shipment_number,
+        shipment_number=sanitize_text(shipment_number, max_len=64),
         promised_at=promised_at,
         status=status,
         total_weight_kg=total,
@@ -46,17 +47,12 @@ def create_shipment(
 
 @transaction.atomic
 def complete_delivery(*, tenant, delivery_id, failed: bool = False, reason: str = "") -> Delivery:
-    delivery = (
-        Delivery.objects.select_for_update()
-        .select_related("shipment")
-        .for_tenant(tenant)
-        .filter(id=delivery_id)
-        .first()
-    )
+    delivery = DeliveryRepository(tenant).for_update(delivery_id)
     if not delivery:
         raise NotFound("Delivery not found")
     if delivery.status in (Delivery.Status.COMPLETED, Delivery.Status.FAILED):
         raise Conflict(f"Delivery already {delivery.status}")
+    reason = sanitize_text(reason, max_len=500)
     if failed:
         delivery.status = Delivery.Status.FAILED
         delivery.failure_reason = reason

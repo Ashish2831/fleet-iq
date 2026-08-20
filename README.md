@@ -60,4 +60,4 @@ python manage.py simulate_gps --tenant acme-logistics --interval 1
 
 `pytest` in `backend/` covers tenant isolation, outbox, Kafka, Mongo history, search, hybrid SOP retrieval, deterministic dispatch, the operations agent, and Phase I process boundaries (Core without Tracking still creates orders, JWKS, composed dashboard).
 
-Distributed layout (optional): `services/README.md`. `docker compose --profile dist up` starts Core, Tracking, AI, Analytics, and the GraphQL gateway. Point the shell at `NEXT_PUBLIC_GRAPHQL_URL=http://127.0.0.1:4000/graphql` and optionally `FLEET_MFE_ORIGIN` / `ORDERS_MFE_ORIGIN` for Fleet + Orders remotes.
+Distributed layout: `services/README.md`. `make dist` or `./scripts/run-dist.sh` starts Core, Tracking, AI, Analytics, gateway, and the Next.js shell. Core GraphQL has no `startAiRun`; Tracking GraphQL has no `orders`. Gateway (`GATEWAY_HTTP=true`) POSTs to those subgraphs. Point the browser at `http://localhost:3000` with `NEXT_PUBLIC_GRAPHQL_URL=http://127.0.0.1:4000/graphql`.

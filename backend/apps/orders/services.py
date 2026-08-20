@@ -3,6 +3,8 @@ from decimal import Decimal
 from django.db import transaction
 
 from apps.common.errors import Conflict, NotFound
+from apps.common.repositories import OrderRepository
+from apps.common.sanitize import sanitize_text
 from apps.events.outbox import enqueue
 from apps.orders.models import Order, OrderItem
 
@@ -30,12 +32,7 @@ def _transition(order: Order, new_status: str) -> Order:
 
 @transaction.atomic
 def confirm_order(*, tenant, order_id) -> Order:
-    order = (
-        Order.objects.select_for_update()
-        .for_tenant(tenant)
-        .filter(id=order_id)
-        .first()
-    )
+    order = OrderRepository(tenant).for_update(order_id)
     if not order:
         raise NotFound("Order not found")
     order = _transition(order, Order.Status.CONFIRMED)
@@ -64,14 +61,14 @@ def create_order(
     status: str = Order.Status.CREATED,
 ) -> Order:
     total = sum((Decimal(str(i["weight_kg"])) * Decimal(str(i["quantity"])) for i in items), Decimal("0"))
-    order = Order.objects.create(
-        tenant=tenant,
+    repo = OrderRepository(tenant)
+    order = repo.create(
         customer=customer,
         warehouse=warehouse,
-        order_number=order_number,
+        order_number=sanitize_text(order_number, max_len=64),
         deadline_at=deadline_at,
         priority=priority,
-        notes=notes,
+        notes=sanitize_text(notes, max_len=4000),
         status=status,
         total_weight_kg=total,
     )
@@ -80,8 +77,8 @@ def create_order(
             OrderItem(
                 tenant=tenant,
                 order=order,
-                sku=item["sku"],
-                description=item.get("description", ""),
+                sku=sanitize_text(item["sku"], max_len=64),
+                description=sanitize_text(item.get("description", ""), max_len=255),
                 quantity=item["quantity"],
                 weight_kg=item["weight_kg"],
                 volume_m3=item.get("volume_m3"),

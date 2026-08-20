@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { gql, rest } from "@/lib/api";
+import { gql, sanitizeText, useDeferredQuery } from "@/lib/api";
 
 type ShipHit = {
   shipmentNumber: string;
@@ -16,7 +16,7 @@ type ShipHit = {
 type KnowHit = { text: string; title: string; source: string; score: number; heading: string };
 
 export default function SearchPage() {
-  const [q, setQ] = useState("Whitefield");
+  const { query: q, deferredQuery, setQuery, isPending } = useDeferredQuery("Whitefield");
   const [delayed, setDelayed] = useState(true);
   const [ships, setShips] = useState<ShipHit[]>([]);
   const [facets, setFacets] = useState<string[]>([]);
@@ -37,13 +37,13 @@ export default function SearchPage() {
           }
           searchKnowledge(q: $q) { text title source score heading }
         }`,
-        { q, delayed }
+        { q: deferredQuery || q, delayed },
       );
       setShips(data.searchShipments.hits);
       setFacets(data.searchShipments.facetsWarehouse);
       setKnowledge(data.searchKnowledge);
-    } catch (e: any) {
-      setErr(e.message);
+    } catch (e: unknown) {
+      setErr(sanitizeText(e instanceof Error ? e.message : "Search failed", 200));
     }
   }
 
@@ -52,7 +52,12 @@ export default function SearchPage() {
       <h2>Ops search</h2>
       <p className="muted">Elasticsearch projection. Postgres remains the source of truth.</p>
       <div style={{ display: "flex", gap: 8, margin: "16px 0", flexWrap: "wrap" }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 280, padding: "8px 10px" }} />
+        <input
+          value={q}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ minWidth: 280, padding: "8px 10px" }}
+          aria-busy={isPending}
+        />
         <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <input type="checkbox" checked={delayed} onChange={(e) => setDelayed(e.target.checked)} />
           Delayed
@@ -77,11 +82,11 @@ export default function SearchPage() {
         <tbody>
           {ships.map((s) => (
             <tr key={s.shipmentNumber}>
-              <td>{s.shipmentNumber}</td>
-              <td>{s.delayed ? "delayed" : s.status}</td>
-              <td>{s.city}</td>
-              <td>{s.warehouseCode}</td>
-              <td>{s.customerName}</td>
+              <td>{sanitizeText(s.shipmentNumber, 64)}</td>
+              <td>{s.delayed ? "delayed" : sanitizeText(s.status, 32)}</td>
+              <td>{sanitizeText(s.city, 64)}</td>
+              <td>{sanitizeText(s.warehouseCode, 32)}</td>
+              <td>{sanitizeText(s.customerName, 120)}</td>
             </tr>
           ))}
         </tbody>
@@ -89,11 +94,11 @@ export default function SearchPage() {
       <h3>Knowledge</h3>
       {knowledge.map((k, i) => (
         <div key={i} className="card" style={{ marginBottom: 8 }}>
-          <b>{k.title}</b>
+          <b>{sanitizeText(k.title, 120)}</b>
           <span>
-            {k.source} · {k.heading}
+            {sanitizeText(k.source, 64)} · {sanitizeText(k.heading, 120)}
           </span>
-          <p className="muted">{k.text.slice(0, 280)}</p>
+          <p className="muted">{sanitizeText(k.text, 280)}</p>
         </div>
       ))}
     </>

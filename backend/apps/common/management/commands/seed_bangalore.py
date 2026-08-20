@@ -5,7 +5,14 @@ from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from apps.catalog.models import Address, Customer, CustomerAddress, Warehouse
+from apps.catalog.models import CustomerAddress
+from apps.common.repositories import (
+    AddressRepository,
+    CustomerRepository,
+    DriverRepository,
+    VehicleRepository,
+    WarehouseRepository,
+)
 from apps.fleet.models import (
     Driver,
     FuelTransaction,
@@ -86,8 +93,7 @@ class Command(BaseCommand):
 
     def _seed_beta(self):
         tenant = Tenant.objects.create(name="Beta Freight", slug="beta-freight", status="active")
-        Address.objects.create(
-            tenant=tenant,
+        AddressRepository(tenant).create(
             line1="Secret other-tenant road",
             city="Mumbai",
             lat=19.07,
@@ -98,6 +104,11 @@ class Command(BaseCommand):
         now = timezone.now()
         today = timezone.localdate()
         tenant = Tenant.objects.create(name="Acme Logistics", slug=SLUG, status="active")
+        addresses_repo = AddressRepository(tenant)
+        warehouses_repo = WarehouseRepository(tenant)
+        customers_repo = CustomerRepository(tenant)
+        vehicles_repo = VehicleRepository(tenant)
+        drivers_repo = DriverRepository(tenant)
 
         perm_codes = [
             "orders.order.create",
@@ -124,8 +135,7 @@ class Command(BaseCommand):
         UserRole.objects.create(user=owner, role=roles["ops_manager"])
 
         addresses = [
-            Address.objects.create(
-                tenant=tenant,
+            addresses_repo.create(
                 line1=line1,
                 city=city,
                 state="Karnataka",
@@ -135,18 +145,17 @@ class Command(BaseCommand):
             )
             for line1, city, lat, lng, _kind in PLACES
         ]
-        peenya = Warehouse.objects.create(
-            tenant=tenant, code="PNY", name="Peenya DC", address=addresses[0]
+        peenya = warehouses_repo.create(
+            code="PNY", name="Peenya DC", address=addresses[0]
         )
-        whitefield_wh = Warehouse.objects.create(
-            tenant=tenant, code="WFD", name="Whitefield Depot", address=addresses[1]
+        whitefield_wh = warehouses_repo.create(
+            code="WFD", name="Whitefield Depot", address=addresses[1]
         )
 
         customers = []
         for i, name in enumerate(CUSTOMER_NAMES):
             addr = addresses[2 + i]
-            customer = Customer.objects.create(
-                tenant=tenant,
+            customer = customers_repo.create(
                 name=name,
                 email=f"ops{i}@customer.example",
                 phone=f"+91980000000{i}",
@@ -177,8 +186,7 @@ class Command(BaseCommand):
         vehicles = []
         for i, vtype in enumerate(types_cycle):
             vehicles.append(
-                Vehicle.objects.create(
-                    tenant=tenant,
+                vehicles_repo.create(
                     vehicle_type=vtype,
                     plate_number=f"KA01AB{1000 + i}",
                     make="Tata" if vtype.name != "bike" else "Bajaj",
@@ -195,8 +203,7 @@ class Command(BaseCommand):
             if i == 2:
                 skills = ["heavy"]
             drivers.append(
-                Driver.objects.create(
-                    tenant=tenant,
+                drivers_repo.create(
                     employee_code=f"DRV-{i + 1:03d}",
                     full_name=full_name,
                     phone=f"+9198111000{i:02d}",
