@@ -207,12 +207,7 @@ def _apply_locked(proposal, order, driver, vehicle, chosen, actor):
 
 @transaction.atomic
 def approve(*, tenant, proposal_id, actor=None) -> DispatchProposal:
-    proposal = (
-        DispatchProposal.objects.select_for_update()
-        .for_tenant(tenant)
-        .filter(id=proposal_id)
-        .first()
-    )
+    proposal = DispatchProposalRepository(tenant).for_update(proposal_id)
     if not proposal:
         raise NotFound("Proposal not found")
     if proposal.status == DispatchProposal.Status.APPLIED:
@@ -225,12 +220,7 @@ def approve(*, tenant, proposal_id, actor=None) -> DispatchProposal:
 
 
 def reject(*, tenant, proposal_id, actor=None) -> DispatchProposal:
-    proposal = (
-        DispatchProposal.objects.select_for_update()
-        .for_tenant(tenant)
-        .filter(id=proposal_id)
-        .first()
-    )
+    proposal = DispatchProposalRepository(tenant).for_update(proposal_id)
     if not proposal:
         raise NotFound("Proposal not found")
     if proposal.status not in (DispatchProposal.Status.PENDING, DispatchProposal.Status.APPROVED):

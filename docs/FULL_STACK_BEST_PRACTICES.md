@@ -2562,10 +2562,10 @@ async function executeChain(
 ## Implementation Checklist & Summary
 
 ### Critical (Must Have)
-> **Coverage note (honest):** Domain **services**, REST viewsets, GraphQL dashboard/list/get/search/mutations/loaders, AI graphs/tools/gateway, tracking GPS, dispatch constraints/solver paths, search driver docs, seed catalog/fleet creates, and `common.queries` go through repositories + sanitize. Intentional leftovers: identity/RBAC managers, outbox/KPI rows, AiRun/IdempotencyKey stores, ID-keyed search helpers (`shipments_for_route/order`), join Subqueries (VehicleAssignment/FuelTransaction), and consumer `Tenant.objects` lookups.
+> **Coverage note:** Domain access goes through `apps.common.repositories` (tenant + global repos). Call sites under `backend/apps` do not use model managers for business reads/writes — only the repository layer and DRF ViewSet `Model.objects.none()` stubs remain. Subquery helpers for OuterRef / ID-keyed search lookups live on the repositories themselves. Backend tests use `tests/helpers.py` (repos) for setup. Frontend shell + MFE remotes share `@fleetiq/sanitize`.
 
 - [x] Event-Driven Architecture — Kafka + transactional outbox (`apps.events`) — **platform-wide**
-- [x] Repository Pattern — Order/Vehicle/Driver/Shipment/Delivery/Route/DispatchProposal/VehicleAssignment (+ stops/items); wired through services, GraphQL, REST, AI, tracking, seed
+- [x] Repository Pattern — full domain + identity/events/AI/idempotency/outbox repositories; wired through services, GraphQL, REST, AI, tracking, seed, consumers, commands
 - [x] Utility Functions Library — `apps.common.utils` (available; not every module imports it yet)
 - [x] Input Sanitization — REST write serializers + domain create/update strings; GraphQL + AI graph inputs sanitized
 - [x] CSRF Protection — middleware + trusted origins; GraphQL Bearer `csrf_exempt`

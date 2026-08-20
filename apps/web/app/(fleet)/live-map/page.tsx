@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { getToken, rest, WS_URL } from "@/lib/api";
+import { getToken, rest, sanitizeText, WS_URL } from "@/lib/api";
 
 type LiveVehicle = {
   id: string;
@@ -96,7 +96,7 @@ export default function LiveMapPage() {
     if (!marker) {
       const el = document.createElement("div");
       el.className = "live-pin";
-      el.title = v.plate || v.id;
+      el.title = sanitizeText(v.plate || v.id, 64);
       marker = new maplibregl.Marker({ element: el }).setLngLat([v.lng, v.lat]).addTo(map);
       el.addEventListener("click", () => {
         select(v);
@@ -177,7 +177,7 @@ export default function LiveMapPage() {
     <div className="live-map">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <h2>Live fleet map</h2>
-        <span className="muted">{status}</span>
+        <span className="muted">{sanitizeText(status, 64)}</span>
       </div>
       <div className="cards">
         <div className="card"><b>{counts.active}</b><span>Active</span></div>
@@ -189,8 +189,8 @@ export default function LiveMapPage() {
         <div ref={mapEl} style={{ width: "100%", height: "100%" }} />
         {selected ? (
           <aside className="live-drawer">
-            <h3>{selected.plate || selected.id.slice(0, 8)}</h3>
-            <p>Status {selected.status}</p>
+            <h3>{sanitizeText(selected.plate || selected.id.slice(0, 8), 64)}</h3>
+            <p>Status {sanitizeText(selected.status, 32)}</p>
             <p>Speed {selected.speed ?? 0} km/h</p>
             <p>{selected.recorded_at ? new Date(selected.recorded_at).toLocaleTimeString() : "No ping"}</p>
             <button className="ghost" onClick={() => setSelected(null)}>Close</button>

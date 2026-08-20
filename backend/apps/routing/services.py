@@ -14,7 +14,7 @@ from apps.common.repositories import (
 from apps.common.sanitize import sanitize_text
 from apps.events.outbox import enqueue
 from apps.fleet.models import Vehicle
-from apps.routing.models import Route, RouteAssignment, RouteStop
+from apps.routing.models import Route, RouteStop
 from apps.shipments.models import Delivery
 from apps.tracking import redis_state as rs
 
@@ -114,9 +114,9 @@ def _assign_route_locked(*, tenant, route_id, driver_id, vehicle_id) -> Route:
         raise NotFound("Driver or vehicle not found")
     if vehicle.status == Vehicle.Status.MAINTENANCE:
         raise Conflict("Vehicle is in maintenance")
-    assignment, _created = RouteAssignment.objects.update_or_create(
+    assignment, _created = RouteAssignmentRepository(tenant).update_or_create(
         route=route,
-        defaults={"tenant": tenant, "driver": driver, "vehicle": vehicle},
+        defaults={"driver": driver, "vehicle": vehicle},
     )
     if route.status == Route.Status.DRAFT:
         route.status = Route.Status.ASSIGNED

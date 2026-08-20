@@ -6,17 +6,22 @@ from rest_framework.test import APIRequestFactory
 
 from apps.common.logging import JsonFormatter, RequestContextFilter
 from apps.common.pagination import StandardLimitOffsetPagination
-from apps.common.repositories import OrderRepository
+from apps.common.repositories import (
+    AddressRepository,
+    CustomerRepository,
+    OrderRepository,
+    TenantRepository,
+    WarehouseRepository,
+)
 from apps.common.sanitize import sanitize_errors, sanitize_text
 from apps.common.utils import as_uuid, chunked, parse_bool, slugify
-from apps.identity.models import Tenant
 from apps.orders.services import create_order
 
 
 @pytest.fixture
 def tenants(db):
-    a = Tenant.objects.create(name="Acme", slug="acme-bp")
-    b = Tenant.objects.create(name="Beta", slug="beta-bp")
+    a = TenantRepository().create(name="Acme", slug="acme-bp")
+    b = TenantRepository().create(name="Beta", slug="beta-bp")
     return a, b
 
 
@@ -69,14 +74,12 @@ def test_request_context_filter_from_correlation():
 
 @pytest.mark.django_db
 def test_order_repository_and_sanitized_create(tenants):
-    from apps.catalog.models import Address, Customer, Warehouse
-
     tenant = tenants[0]
-    addr = Address.objects.create(
-        tenant=tenant, line1="1 Main", city="BLR", state="KA", postal_code="560001", lat=12.9, lng=77.6
+    addr = AddressRepository(tenant).create(
+        line1="1 Main", city="BLR", state="KA", postal_code="560001", lat=12.9, lng=77.6
     )
-    customer = Customer.objects.create(tenant=tenant, name="Acme", email="a@x.com")
-    warehouse = Warehouse.objects.create(tenant=tenant, code="W1", name="WH", address=addr)
+    customer = CustomerRepository(tenant).create(name="Acme", email="a@x.com")
+    warehouse = WarehouseRepository(tenant).create(code="W1", name="WH", address=addr)
     order = create_order(
         tenant=tenant,
         customer=customer,

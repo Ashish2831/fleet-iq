@@ -55,9 +55,9 @@ class User(TenantModel):
         return list(self.roles.values_list("name", flat=True))
 
     def permission_codenames(self) -> list[str]:
-        return list(
-            Permission.objects.filter(roles__users=self).distinct().values_list("codename", flat=True)
-        )
+        from apps.common.repositories import PermissionRepository
+
+        return PermissionRepository().codenames_for_user(self)
 
 
 class Permission(models.Model):

@@ -24,6 +24,7 @@ from apps.common.repositories import (
     ShipmentRepository,
     VehicleAssignmentRepository,
     VehicleRepository,
+    AiRunRepository,
 )
 from apps.common.sanitize import sanitize_text
 from apps.common.utils import clamp
@@ -36,7 +37,6 @@ from apps.routing.models import Route as RouteModel
 from apps.routing.services import assign_route
 from apps.shipments.models import Shipment as ShipmentModel
 from apps.ai.gateway import serialize_run, start_run
-from apps.ai.models import AiRun as AiRunModel
 from apps.dispatch.services import approve as approve_dispatch
 from apps.dispatch.services import reject as reject_dispatch
 from apps.search.query import search_drivers, search_knowledge, search_shipments
@@ -979,7 +979,7 @@ class AiQuery:
         user = _user(info)
 
         def inner():
-            run = AiRunModel.objects.for_tenant(user.tenant).filter(id=id).first()
+            run = AiRunRepository(user.tenant).get(id)
             return _ai_run_type(run) if run else None
 
         return await sync_to_async(inner)()
@@ -989,7 +989,7 @@ class AiQuery:
         user = _user(info)
 
         def inner():
-            qs = AiRunModel.objects.for_tenant(user.tenant).order_by("-created_at")[:50]
+            qs = AiRunRepository(user.tenant).recent(limit=50)
             return [_ai_run_type(r) for r in qs]
 
         return await sync_to_async(inner)()

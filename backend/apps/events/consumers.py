@@ -4,12 +4,10 @@ import logging
 from datetime import datetime, timezone
 
 from django.db import IntegrityError, transaction
-from django.db.models import F
 
+from apps.common.repositories import DailyEventCountRepository, ProcessedEventRepository, TenantRepository
 from apps.events.bus import BusRecord, EventBus, get_bus
-from apps.events.models import DailyEventCount, ProcessedEvent
 from apps.events.topics import DLQ, DELIVERIES, FLEET, LOCATION, ORDERS, ROUTING
-from apps.identity.models import Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +28,12 @@ def _parse(record: BusRecord) -> dict:
 
 
 def already_processed(consumer_name: str, event_id: str) -> bool:
-    return ProcessedEvent.objects.filter(consumer_name=consumer_name, event_id=str(event_id)).exists()
+    return ProcessedEventRepository().already_processed(consumer_name, event_id)
 
 
 def mark_processed(consumer_name: str, event_id: str) -> bool:
     try:
-        ProcessedEvent.objects.create(consumer_name=consumer_name, event_id=str(event_id))
+        ProcessedEventRepository().create(consumer_name=consumer_name, event_id=str(event_id))
         return True
     except IntegrityError:
         return False
@@ -66,7 +64,7 @@ def handle_notify(env: dict) -> None:
 
 
 def handle_analytics(env: dict) -> None:
-    tenant = Tenant.objects.filter(id=env["tenant_id"]).first()
+    tenant = TenantRepository().by_id(env["tenant_id"])
     if tenant is None:
         raise PoisonMessage("unknown tenant_id")
     occurred = env.get("occurred_at") or ""
@@ -74,24 +72,23 @@ def handle_analytics(env: dict) -> None:
         day = datetime.fromisoformat(occurred.replace("Z", "+00:00")).date()
     except (TypeError, ValueError):
         day = datetime.now(timezone.utc).date()
+    counts = DailyEventCountRepository(tenant)
     with transaction.atomic():
-        row, created = DailyEventCount.objects.select_for_update().get_or_create(
-            tenant=tenant,
+        row, created = counts.get_or_create_locked(
             day=day,
             event_type=env["event_type"],
             defaults={"count": 1},
         )
         if not created:
-            DailyEventCount.objects.filter(pk=row.pk).update(count=F("count") + 1)
+            counts.increment(row.pk)
 
 
 def handle_dispatch(env: dict) -> None:
     if env.get("event_type") != "OrderConfirmed":
         return
     from apps.dispatch.graph import run_dispatch
-    from apps.identity.models import Tenant
 
-    tenant = Tenant.objects.filter(id=env.get("tenant_id")).first()
+    tenant = TenantRepository().by_id(env.get("tenant_id"))
     payload = env.get("payload") or {}
     order_id = payload.get("order_id") or env.get("aggregate_id")
     if tenant and order_id:

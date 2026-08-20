@@ -1,18 +1,14 @@
 "use client";
 
-const TAGS = /<[^>]*>/g;
-
-function sanitizeText(value: unknown, maxLen = 200): string {
-  if (value == null) return "";
-  const text = String(value).replace(TAGS, "").trim();
-  return text.length > maxLen ? text.slice(0, maxLen) : text;
-}
+import { sanitizeText } from "@fleetiq/sanitize";
 
 export default function Page() {
   return (
     <main>
       <h2>{sanitizeText("Vehicles remote")}</h2>
-      <p>{sanitizeText("Fleet MFE — vehicle master list. Data still comes from the GraphQL gateway.")}</p>
+      <p>
+        {sanitizeText("Fleet MFE — vehicle master list. Data still comes from the GraphQL gateway.")}
+      </p>
     </main>
   );
 }

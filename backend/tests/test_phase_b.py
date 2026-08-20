@@ -1,27 +1,21 @@
 from rest_framework.test import APIClient
 
-from apps.identity.models import Role, Tenant, User, UserRole
-from apps.orders.models import Order
-from apps.catalog.models import Address, Customer, Warehouse
-from apps.orders.services import create_order
-
-
-def _login(client, email="ops@acme-logistics.example", tenant="acme-logistics", password="password"):
-    res = client.post(
-        "/api/v1/auth/login",
-        {"email": email, "password": password, "tenant": tenant},
-        format="json",
-    )
-    assert res.status_code == 200, res.content
-    return res.data["access"]
+from helpers import (
+    acme_tenant,
+    beta_tenant,
+    first_customer,
+    first_order,
+    first_warehouse,
+    login,
+    make_ops_user,
+    seed_bangalore,
+)
 
 
 def test_login_and_me(db):
-    from django.core.management import call_command
-
-    call_command("seed_bangalore", reset=True)
+    seed_bangalore()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     me = client.get("/api/v1/me")
     assert me.status_code == 200
@@ -29,36 +23,24 @@ def test_login_and_me(db):
 
 
 def test_rest_does_not_leak_across_tenants(db):
-    from django.core.management import call_command
-    from django.contrib.auth.hashers import make_password
-
-    call_command("seed_bangalore", reset=True)
-    beta = Tenant.objects.get(slug="beta-freight")
-    user = User.objects.create(
-        tenant=beta,
-        email="ops@beta.example",
-        full_name="Beta Ops",
-        hashed_password=make_password("password"),
-    )
-    role = Role.objects.create(tenant=beta, name="ops_manager")
-    UserRole.objects.create(user=user, role=role)
-    acme_order = Order.objects.for_tenant(Tenant.objects.get(slug="acme-logistics")).first()
+    seed_bangalore()
+    beta = beta_tenant()
+    make_ops_user(beta, email="ops@beta.example", full_name="Beta Ops")
+    acme_order = first_order(acme_tenant())
     client = APIClient()
-    token = _login(client, email="ops@beta.example", tenant="beta-freight")
+    token = login(client, email="ops@beta.example", tenant="beta-freight")
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.get(f"/api/v1/orders/{acme_order.id}/")
     assert res.status_code == 404
 
 
 def test_create_order_idempotent(db):
-    from django.core.management import call_command
-
-    call_command("seed_bangalore", reset=True)
-    tenant = Tenant.objects.get(slug="acme-logistics")
-    customer = Customer.objects.for_tenant(tenant).first()
-    warehouse = Warehouse.objects.for_tenant(tenant).first()
+    seed_bangalore()
+    tenant = acme_tenant()
+    customer = first_customer(tenant)
+    warehouse = first_warehouse(tenant)
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     payload = {
         "customer_id": str(customer.id),
@@ -78,13 +60,11 @@ def test_create_order_idempotent(db):
 
 
 def test_confirm_illegal_transition_is_409(db):
-    from django.core.management import call_command
-
-    call_command("seed_bangalore", reset=True)
-    tenant = Tenant.objects.get(slug="acme-logistics")
-    order = Order.objects.for_tenant(tenant).filter(status="confirmed").first()
+    seed_bangalore()
+    tenant = acme_tenant()
+    order = first_order(tenant, status="confirmed")
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.post(f"/api/v1/orders/{order.id}/confirm/")
     assert res.status_code == 409
@@ -92,23 +72,13 @@ def test_confirm_illegal_transition_is_409(db):
 
 
 def test_graphql_dashboard_and_tenant_isolation(db):
-    from django.core.management import call_command
-    from django.contrib.auth.hashers import make_password
-
-    call_command("seed_bangalore", reset=True)
-    acme = Tenant.objects.get(slug="acme-logistics")
-    order = Order.objects.for_tenant(acme).first()
-    beta = Tenant.objects.get(slug="beta-freight")
-    user = User.objects.create(
-        tenant=beta,
-        email="ops@beta.example",
-        full_name="Beta Ops",
-        hashed_password=make_password("password"),
-    )
-    role = Role.objects.create(tenant=beta, name="ops_manager")
-    UserRole.objects.create(user=user, role=role)
+    seed_bangalore()
+    acme = acme_tenant()
+    order = first_order(acme)
+    beta = beta_tenant()
+    make_ops_user(beta, email="ops@beta.example", full_name="Beta Ops")
     client = APIClient()
-    acme_token = _login(client)
+    acme_token = login(client)
     query = """
       query($id: ID!) {
         dashboard { activeVehicles delayedDeliveries activeDrivers routes { id status eta } }
@@ -127,7 +97,7 @@ def test_graphql_dashboard_and_tenant_isolation(db):
     assert "activeVehicles" in body["data"]["dashboard"]
     assert body["data"]["order"]["id"] == str(order.id)
 
-    beta_token = _login(client, email="ops@beta.example", tenant="beta-freight")
+    beta_token = login(client, email="ops@beta.example", tenant="beta-freight")
     leak = client.post(
         "/graphql",
         {"query": "query($id: ID!) { order(id: $id) { id } }", "variables": {"id": str(order.id)}},
@@ -138,13 +108,12 @@ def test_graphql_dashboard_and_tenant_isolation(db):
 
 
 def test_graphql_dataloader_query_count(db):
-    from django.core.management import call_command
     from django.test.utils import CaptureQueriesContext
     from django.db import connection
 
-    call_command("seed_bangalore", reset=True)
+    seed_bangalore()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     query = """
       query {
         orders(first: 10) {

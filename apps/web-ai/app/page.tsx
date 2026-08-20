@@ -1,12 +1,6 @@
 "use client";
 
-const TAGS = /<[^>]*>/g;
-
-function sanitizeText(value: unknown, maxLen = 200): string {
-  if (value == null) return "";
-  const text = String(value).replace(TAGS, "").trim();
-  return text.length > maxLen ? text.slice(0, maxLen) : text;
-}
+import { sanitizeText } from "@fleetiq/sanitize";
 
 export default function Page() {
   return (

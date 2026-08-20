@@ -24,9 +24,8 @@ from apps.api.graphql.schema import (
 )
 from apps.api.permissions import WRITE_ROLES, _roles
 from apps.ai.gateway import start_run
-from apps.ai.models import AiRun as AiRunModel
 from apps.common.errors import ApiError
-from apps.common.repositories import VehicleRepository
+from apps.common.repositories import AiRunRepository, VehicleRepository
 from apps.common.sanitize import sanitize_text
 from apps.events.kpis import tenant_kpis
 from apps.telemetry.queries import vehicle_track
@@ -157,7 +156,7 @@ class AiSubgraphQuery:
         user = _user(info)
 
         def inner():
-            run = AiRunModel.objects.for_tenant(user.tenant).filter(id=id).first()
+            run = AiRunRepository(user.tenant).get(id)
             return _ai_run_type(run) if run else None
 
         return await sync_to_async(inner)()
@@ -167,7 +166,7 @@ class AiSubgraphQuery:
         user = _user(info)
 
         def inner():
-            qs = AiRunModel.objects.for_tenant(user.tenant).order_by("-created_at")[:50]
+            qs = AiRunRepository(user.tenant).recent(limit=50)
             return [_ai_run_type(r) for r in qs]
 
         return await sync_to_async(inner)()

@@ -3,16 +3,13 @@ from rest_framework.exceptions import AuthenticationFailed
 
 from apps.api import jwt as jwt_mod
 from apps.common.errors import Unauthorized
+from apps.common.repositories import UserRepository
 from apps.identity.models import User
 
 
 def user_from_access(token: str) -> User:
     payload = jwt_mod.decode(token, "access")
-    user = (
-        User.objects.select_related("tenant")
-        .filter(id=payload["sub"], tenant_id=payload["tid"], is_active=True)
-        .first()
-    )
+    user = UserRepository.by_id_in_tenant(payload["sub"], payload["tid"])
     if not user:
         raise Unauthorized("User not found")
     user._token_roles = payload.get("roles") or []

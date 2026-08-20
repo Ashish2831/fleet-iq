@@ -7,6 +7,7 @@ from apps.ai.graphs import dispatch_explain, maintenance, operations, route_risk
 from apps.ai.models import AiRun
 from apps.ai.traces import record_trace
 from apps.common.errors import BadRequest
+from apps.common.repositories import AiRunRepository
 from apps.common.sanitize import sanitize_text
 
 AGENTS = {
@@ -36,8 +37,7 @@ def start_run(*, tenant, user, agent: str, question: str) -> AiRun:
     question = sanitize_text(question, max_len=4000)
     if agent not in AGENTS:
         raise BadRequest(f"Unknown agent {agent}")
-    run = AiRun.objects.create(
-        tenant=tenant,
+    run = AiRunRepository(tenant).create(
         user=user,
         agent=agent,
         input=question,

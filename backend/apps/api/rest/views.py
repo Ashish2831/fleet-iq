@@ -30,12 +30,23 @@ from datetime import timedelta
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
-from apps.catalog.models import Address, Customer, Warehouse
+from apps.catalog.models import Customer, Warehouse
 from apps.common.errors import BadRequest, NotFound, Unauthorized
 from apps.common.patterns.io_formats import get_export_strategy
 from apps.common.queries import delayed_shipments
+from apps.common.repositories import (
+    CustomerRepository,
+    DeliveryRepository,
+    DriverRepository,
+    OrderRepository,
+    RouteRepository,
+    ShipmentRepository,
+    TenantRepository,
+    UserRepository,
+    VehicleRepository,
+    WarehouseRepository,
+)
 from apps.fleet.models import Driver, Vehicle
-from apps.identity.models import Tenant, User
 from apps.orders.models import Order
 from apps.orders.services import confirm_order, create_order
 from apps.routing.models import Route
@@ -84,12 +95,8 @@ def login(request):
     tenant_slug = request.data.get("tenant")
     if not email or not password or not tenant_slug:
         raise Unauthorized("email, password, and tenant are required")
-    tenant = Tenant.objects.filter(slug=tenant_slug, status=Tenant.Status.ACTIVE).first()
-    user = (
-        User.objects.select_related("tenant").filter(tenant=tenant, email=email, is_active=True).first()
-        if tenant
-        else None
-    )
+    tenant = TenantRepository().by_slug(tenant_slug, active_only=True)
+    user = UserRepository(tenant).by_email(email) if tenant else None
     if not user or not check_password(password, user.hashed_password):
         raise Unauthorized("Invalid credentials")
     access = jwt_mod.access_token(user)
@@ -105,7 +112,7 @@ def refresh(request):
     if not token:
         raise Unauthorized("Missing refresh token")
     payload = jwt_mod.decode(token, "refresh")
-    user = User.objects.select_related("tenant").filter(id=payload["sub"], tenant_id=payload["tid"]).first()
+    user = UserRepository.by_id_in_tenant(payload["sub"], payload["tid"])
     if not user or not user.is_active:
         raise Unauthorized("Invalid refresh token")
     return Response({"access": jwt_mod.access_token(user)})
@@ -137,24 +144,20 @@ class TenantViewSet(viewsets.ModelViewSet):
 
 
 class DriverViewSet(TenantViewSet):
-    queryset = Driver.objects.filter(deleted_at__isnull=True)
+    queryset = Driver.objects.none()
     serializer_class = DriverSerializer
     filterset_fields = ("status",)
 
     def get_queryset(self):
-        from apps.common.repositories import DriverRepository
-
         return DriverRepository(self.request.user.tenant).qs()
 
 
 class VehicleViewSet(TenantViewSet):
-    queryset = Vehicle.objects.select_related("vehicle_type").filter(deleted_at__isnull=True)
+    queryset = Vehicle.objects.none()
     serializer_class = VehicleSerializer
     filterset_fields = ("status",)
 
     def get_queryset(self):
-        from apps.common.repositories import VehicleRepository
-
         return VehicleRepository(self.request.user.tenant).qs()
 
     @action(detail=True, methods=["get"])
@@ -194,12 +197,10 @@ class VehicleViewSet(TenantViewSet):
 
 
 class WarehouseViewSet(TenantViewSet):
-    queryset = Warehouse.objects.select_related("address")
+    queryset = Warehouse.objects.none()
     serializer_class = WarehouseSerializer
 
     def get_queryset(self):
-        from apps.common.repositories import WarehouseRepository
-
         return WarehouseRepository(self.request.user.tenant).qs()
 
     def perform_create(self, serializer):
@@ -213,23 +214,19 @@ class WarehouseViewSet(TenantViewSet):
 
 
 class CustomerViewSet(TenantViewSet):
-    queryset = Customer.objects.filter(deleted_at__isnull=True)
+    queryset = Customer.objects.none()
     serializer_class = CustomerSerializer
     filterset_fields = ("name",)
 
     def get_queryset(self):
-        from apps.common.repositories import CustomerRepository
-
         return CustomerRepository(self.request.user.tenant).qs().filter(deleted_at__isnull=True)
 
 
 class OrderViewSet(TenantViewSet):
-    queryset = Order.objects.select_related("customer", "warehouse").prefetch_related("items")
+    queryset = Order.objects.none()
     filterset_fields = ("status",)
 
     def get_queryset(self):
-        from apps.common.repositories import OrderRepository
-
         return OrderRepository(self.request.user.tenant).qs()
 
     def get_serializer_class(self):
@@ -239,8 +236,6 @@ class OrderViewSet(TenantViewSet):
 
     def create(self, request, *args, **kwargs):
         def handler():
-            from apps.common.repositories import CustomerRepository, OrderRepository, WarehouseRepository
-
             ser = OrderWriteSerializer(data=request.data)
             ser.is_valid(raise_exception=True)
             data = ser.validated_data
@@ -298,13 +293,11 @@ class OrderViewSet(TenantViewSet):
 
 
 class ShipmentViewSet(TenantViewSet):
-    queryset = Shipment.objects.select_related("warehouse", "delivery_address")
+    queryset = Shipment.objects.none()
     serializer_class = ShipmentSerializer
     filterset_fields = ("status",)
 
     def get_queryset(self):
-        from apps.common.repositories import ShipmentRepository
-
         return ShipmentRepository(self.request.user.tenant).qs()
 
     def perform_create(self, serializer):
@@ -312,15 +305,11 @@ class ShipmentViewSet(TenantViewSet):
 
 
 class RouteViewSet(TenantViewSet):
-    queryset = Route.objects.select_related(
-        "assignment__driver", "assignment__vehicle"
-    ).prefetch_related("stops")
+    queryset = Route.objects.none()
     serializer_class = RouteSerializer
     filterset_fields = ("status",)
 
     def get_queryset(self):
-        from apps.common.repositories import RouteRepository
-
         return RouteRepository(self.request.user.tenant).qs()
 
     def perform_create(self, serializer):
@@ -328,8 +317,6 @@ class RouteViewSet(TenantViewSet):
 
     @action(detail=True, methods=["post"], permission_classes=[IsTenantAuthenticated, CanAssign])
     def assign(self, request, pk=None):
-        from apps.common.repositories import RouteRepository
-
         ser = AssignRouteSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         route = assign_route(
@@ -345,10 +332,9 @@ class RouteViewSet(TenantViewSet):
 class DeliveryViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsTenantAuthenticated, CanWriteOps]
     serializer_class = DeliverySerializer
-    queryset = Delivery.objects.select_related("shipment")
+    queryset = Delivery.objects.none()
 
     def get_queryset(self):
-        from apps.common.repositories import DeliveryRepository
         from apps.common.sanitize import sanitize_text
 
         qs = DeliveryRepository(self.request.user.tenant).qs()

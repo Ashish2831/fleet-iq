@@ -3,37 +3,38 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import redis
 from django.contrib.auth.hashers import make_password
-from django.core.management import call_command
 from rest_framework.test import APIClient
 
 from apps.common.errors import Conflict
-from apps.fleet.models import Driver, Vehicle
-from apps.identity.models import Role, Tenant, User, UserRole
+from apps.common.repositories import RoleRepository, UserRoleRepository
 from apps.routing.models import Route
 from apps.routing.services import assign_route
 from apps.tracking import redis_state as rs
-
-
-def _login(client, email="ops@acme-logistics.example", tenant="acme-logistics", password="password"):
-    res = client.post(
-        "/api/v1/auth/login",
-        {"email": email, "password": password, "tenant": tenant},
-        format="json",
-    )
-    assert res.status_code == 200, res.content
-    return res.data["access"]
+from helpers import (
+    acme_tenant,
+    beta_tenant,
+    drivers,
+    first_vehicle,
+    login,
+    make_ops_user,
+    routes,
+    seed_bangalore,
+    users,
+    vehicles,
+)
 
 
 def _seed():
-    call_command("seed_bangalore", reset=True)
-    tenant = Tenant.objects.get(slug="acme-logistics")
+    seed_bangalore()
+    tenant = acme_tenant()
     vehicle = (
-        Vehicle.objects.for_tenant(tenant)
+        vehicles(tenant)
+        .tenant_qs()
         .filter(route_assignments__route__status=Route.Status.IN_PROGRESS)
         .first()
     )
     if vehicle is None:
-        vehicle = Vehicle.objects.for_tenant(tenant).first()
+        vehicle = first_vehicle(tenant)
     return tenant, vehicle
 
 
@@ -54,7 +55,7 @@ def _payload(vehicle, **overrides):
 def test_ingest_writes_redis_hash_and_geo(db, fake_redis):
     tenant, vehicle = _seed()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.post("/api/v1/tracking/locations", _payload(vehicle), format="json")
     assert res.status_code == 202, res.content
@@ -69,7 +70,7 @@ def test_ingest_writes_redis_hash_and_geo(db, fake_redis):
 def test_duplicate_event_id_does_not_move_pin(db, fake_redis):
     tenant, vehicle = _seed()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     first = _payload(vehicle, event_id="dup-1", lat=12.97, lng=77.59)
     second = _payload(vehicle, event_id="dup-1", lat=13.10, lng=77.80)
@@ -85,7 +86,7 @@ def test_duplicate_event_id_does_not_move_pin(db, fake_redis):
 def test_stale_recorded_at_ignored(db, fake_redis):
     tenant, vehicle = _seed()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     now = datetime.now(timezone.utc)
     client.post(
@@ -112,7 +113,7 @@ def test_stale_recorded_at_ignored(db, fake_redis):
 def test_gps_rate_limit_per_vehicle(db):
     _, vehicle = _seed()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     a = client.post("/api/v1/tracking/locations", _payload(vehicle, event_id="r1"), format="json")
     b = client.post("/api/v1/tracking/locations", _payload(vehicle, event_id="r2"), format="json")
@@ -122,17 +123,10 @@ def test_gps_rate_limit_per_vehicle(db):
 
 def test_ingest_does_not_leak_across_tenants(db):
     _, vehicle = _seed()
-    beta = Tenant.objects.get(slug="beta-freight")
-    user = User.objects.create(
-        tenant=beta,
-        email="ops@beta.example",
-        full_name="Beta Ops",
-        hashed_password=make_password("password"),
-    )
-    role = Role.objects.create(tenant=beta, name="ops_manager")
-    UserRole.objects.create(user=user, role=role)
+    beta = beta_tenant()
+    make_ops_user(beta, email="ops@beta.example", full_name="Beta Ops")
     client = APIClient()
-    token = _login(client, email="ops@beta.example", tenant="beta-freight")
+    token = login(client, email="ops@beta.example", tenant="beta-freight")
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.post("/api/v1/tracking/locations", _payload(vehicle), format="json")
     assert res.status_code == 404
@@ -140,23 +134,21 @@ def test_ingest_does_not_leak_across_tenants(db):
 
 def test_driver_cannot_spoof_other_vehicle(db):
     tenant, vehicle = _seed()
-    other = Vehicle.objects.for_tenant(tenant).exclude(id=vehicle.id).first()
-    driver_user = User.objects.create(
-        tenant=tenant,
+    other = vehicles(tenant).tenant_qs().exclude(id=vehicle.id).first()
+    driver_user = users(tenant).create(
         email="driver@acme.example",
         full_name="Solo Driver",
         hashed_password=make_password("password"),
     )
-    role = Role.objects.get(tenant=tenant, name="driver")
-    UserRole.objects.create(user=driver_user, role=role)
-    Driver.objects.create(
-        tenant=tenant,
+    role = RoleRepository(tenant).get_or_none(name="driver")
+    UserRoleRepository(tenant).create(user=driver_user, role=role)
+    drivers(tenant).create(
         user=driver_user,
         employee_code="DRV-SPOOF",
         full_name="Solo Driver",
     )
     client = APIClient()
-    token = _login(client, email="driver@acme.example")
+    token = login(client, email="driver@acme.example")
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.post("/api/v1/tracking/locations", _payload(other), format="json")
     assert res.status_code == 403
@@ -165,7 +157,7 @@ def test_driver_cannot_spoof_other_vehicle(db):
 def test_ingest_redis_down_is_503(db, monkeypatch):
     _, vehicle = _seed()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
 
     def boom():
@@ -180,7 +172,7 @@ def test_ingest_redis_down_is_503(db, monkeypatch):
 def test_expired_ttl_surfaces_offline(db, fake_redis):
     tenant, vehicle = _seed()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     client.post("/api/v1/tracking/locations", _payload(vehicle), format="json")
     fake_redis.delete(rs.vehicle_key(tenant, vehicle.id))
@@ -193,7 +185,7 @@ def test_expired_ttl_surfaces_offline(db, fake_redis):
 
 def test_assign_route_lock_conflict(db, fake_redis):
     tenant, _ = _seed()
-    route = Route.objects.for_tenant(tenant).select_related("assignment").get(route_number="RT-101")
+    route = routes(tenant).qs().get(route_number="RT-101")
     fake_redis.set(rs.route_lock_key(tenant, route.id), "held")
     with pytest.raises(Conflict):
         assign_route(
@@ -217,7 +209,7 @@ def test_lock_release_requires_matching_token(db, fake_redis):
 def test_graphql_live_fields(db):
     tenant, vehicle = _seed()
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     client.post("/api/v1/tracking/locations", _payload(vehicle, event_id="gql-1"), format="json")
     query = """
@@ -242,6 +234,8 @@ def test_graphql_live_fields(db):
 
 
 def test_simulate_gps_once(db, fake_redis):
+    from django.core.management import call_command
+
     tenant, _ = _seed()
     call_command("simulate_gps", tenant="acme-logistics", once=True)
     assert fake_redis.scard(rs.seen_key(tenant)) >= 1
@@ -258,17 +252,10 @@ async def test_ws_snapshot_and_tenant_room():
 
     tenant, vehicle = await sync_to_async(_seed)()
     client = APIClient()
-    acme_token = await sync_to_async(_login)(client)
-    beta = await sync_to_async(Tenant.objects.get)(slug="beta-freight")
-    user = await sync_to_async(User.objects.create)(
-        tenant=beta,
-        email="ops@beta.example",
-        full_name="Beta Ops",
-        hashed_password=make_password("password"),
-    )
-    role = await sync_to_async(Role.objects.create)(tenant=beta, name="ops_manager")
-    await sync_to_async(UserRole.objects.create)(user=user, role=role)
-    beta_token = await sync_to_async(_login)(client, email="ops@beta.example", tenant="beta-freight")
+    acme_token = await sync_to_async(login)(client)
+    beta = await sync_to_async(beta_tenant)()
+    await sync_to_async(make_ops_user)(beta, email="ops@beta.example", full_name="Beta Ops")
+    beta_token = await sync_to_async(login)(client, email="ops@beta.example", tenant="beta-freight")
 
     acme = WebsocketCommunicator(application, f"/ws/fleet?token={acme_token}")
     beta_ws = WebsocketCommunicator(application, f"/ws/fleet?token={beta_token}")

@@ -13,13 +13,13 @@ from apps.common.queries import delayed_shipments, delivery_counts
 from apps.common.repositories import (
     DispatchProposalRepository,
     DriverRepository,
+    MaintenanceRecordRepository,
     ShipmentRepository,
     VehicleRepository,
 )
 from apps.common.sanitize import sanitize_text
 from apps.dispatch.services import propose
 from apps.events.outbox import enqueue
-from apps.fleet.models import MaintenanceRecord
 from apps.search.query import search_drivers, search_knowledge, search_shipments
 from apps.shipments.models import Shipment
 from apps.telemetry.queries import vehicle_track
@@ -229,8 +229,7 @@ def open_maintenance_ticket(ctx: ToolContext, vehicle_id: str, reason="") -> dic
     if not vehicle:
         raise NotFound("Vehicle not found")
     notes = sanitize_text(reason or "Opened by maintenance agent", max_len=500)
-    rec = MaintenanceRecord.objects.create(
-        tenant=ctx.tenant,
+    rec = MaintenanceRecordRepository(ctx.tenant).create(
         vehicle=vehicle,
         kind="inspection",
         occurred_at=timezone.now(),

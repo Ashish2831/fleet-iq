@@ -1,2 +1,5 @@
-const nextConfig = { reactStrictMode: true };
+const nextConfig = {
+  reactStrictMode: true,
+  transpilePackages: ["@fleetiq/sanitize"],
+};
 export default nextConfig;

@@ -5,6 +5,7 @@ const orders = process.env.ORDERS_MFE_ORIGIN;
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  transpilePackages: ["@fleetiq/sanitize"],
   async rewrites() {
     const rules = [];
     if (fleet) {

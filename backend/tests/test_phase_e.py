@@ -1,31 +1,18 @@
 from datetime import datetime, timedelta, timezone
 
-from django.contrib.auth.hashers import make_password
-from django.core.management import call_command
 from rest_framework.test import APIClient
 
 from apps.events.consumers import consume_once
 from apps.events.envelopes import envelope
 from apps.events.topics import DLQ, LOCATION
-from apps.fleet.models import Vehicle
-from apps.identity.models import Role, Tenant, User, UserRole
 from apps.telemetry.queries import downsample_window, vehicle_track
 from apps.telemetry.store import get_store
-
-
-def _login(client, email="ops@acme-logistics.example", tenant="acme-logistics", password="password"):
-    res = client.post(
-        "/api/v1/auth/login",
-        {"email": email, "password": password, "tenant": tenant},
-        format="json",
-    )
-    assert res.status_code == 200, res.content
-    return res.data["access"]
+from helpers import acme_tenant, beta_tenant, first_vehicle, login, make_ops_user, seed_bangalore
 
 
 def _seed():
-    call_command("seed_bangalore", reset=True)
-    return Tenant.objects.get(slug="acme-logistics")
+    seed_bangalore()
+    return acme_tenant()
 
 
 def _gps(vehicle, **overrides):
@@ -43,7 +30,7 @@ def _gps(vehicle, **overrides):
 
 
 def _ping(client, vehicle, **overrides):
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.post("/api/v1/tracking/locations", _gps(vehicle, **overrides), format="json")
     assert res.status_code == 202, res.content
@@ -52,7 +39,7 @@ def _ping(client, vehicle, **overrides):
 
 def test_location_consumer_writes_history(db, memory_bus, memory_telemetry):
     tenant = _seed()
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     client = APIClient()
     result = _ping(client, vehicle, event_id="hist-1", lat=12.97, lng=77.59)
     assert result["ok"] >= 1
@@ -71,7 +58,7 @@ def test_location_consumer_writes_history(db, memory_bus, memory_telemetry):
 
 def test_duplicate_event_id_is_skipped(db, memory_bus, memory_telemetry):
     tenant = _seed()
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     client = APIClient()
     _ping(client, vehicle, event_id="dup-e", lat=12.97, lng=77.59)
     memory_bus.reset_group("fleetiq-location")
@@ -82,10 +69,10 @@ def test_duplicate_event_id_is_skipped(db, memory_bus, memory_telemetry):
 
 def test_rest_track_and_tenant_isolation(db, memory_bus, memory_telemetry):
     tenant = _seed()
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     client = APIClient()
     _ping(client, vehicle, event_id="iso-1", lat=12.96, lng=77.60)
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     now = datetime.now(timezone.utc)
     res = client.get(
@@ -101,16 +88,9 @@ def test_rest_track_and_tenant_isolation(db, memory_bus, memory_telemetry):
     )
     assert wide.status_code == 400
 
-    beta = Tenant.objects.get(slug="beta-freight")
-    user = User.objects.create(
-        tenant=beta,
-        email="ops@beta.example",
-        full_name="Beta Ops",
-        hashed_password=make_password("password"),
-    )
-    role = Role.objects.create(tenant=beta, name="ops_manager")
-    UserRole.objects.create(user=user, role=role)
-    beta_token = _login(client, email="ops@beta.example", tenant="beta-freight")
+    beta = beta_tenant()
+    make_ops_user(beta, email="ops@beta.example", full_name="Beta Ops")
+    beta_token = login(client, email="ops@beta.example", tenant="beta-freight")
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {beta_token}")
     leak = client.get(f"/api/v1/vehicles/{vehicle.id}/track/")
     assert leak.status_code == 404
@@ -118,10 +98,10 @@ def test_rest_track_and_tenant_isolation(db, memory_bus, memory_telemetry):
 
 def test_graphql_track(db, memory_bus, memory_telemetry):
     tenant = _seed()
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     client = APIClient()
     _ping(client, vehicle, event_id="gql-1", lat=12.95, lng=77.61)
-    token = _login(client)
+    token = login(client)
     now = datetime.now(timezone.utc)
     query = """
       query($id: ID!, $from: DateTime!, $to: DateTime!) {
@@ -150,7 +130,7 @@ def test_graphql_track(db, memory_bus, memory_telemetry):
 
 def test_downsample_and_expire(db, memory_telemetry):
     tenant = _seed()
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     now = datetime.now(timezone.utc)
     store = get_store()
     store.claim_event("old-1")
@@ -182,7 +162,7 @@ def test_downsample_and_expire(db, memory_telemetry):
 
 def test_poison_location_goes_to_dlq(db, memory_bus):
     tenant = _seed()
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     memory_bus.produce(
         LOCATION,
         str(vehicle.id),
@@ -202,9 +182,9 @@ def test_poison_location_goes_to_dlq(db, memory_bus):
 
 def test_ingest_still_202_without_waiting_on_history(db, memory_bus):
     tenant = _seed()
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.post("/api/v1/tracking/locations", _gps(vehicle, event_id="live-1"), format="json")
     assert res.status_code == 202

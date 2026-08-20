@@ -4,7 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.common.errors import Conflict, NotFound
-from apps.common.repositories import DeliveryRepository, ShipmentRepository
+from apps.common.repositories import DeliveryRepository, ShipmentItemRepository, ShipmentRepository
 from apps.common.sanitize import sanitize_text
 from apps.events.outbox import enqueue
 from apps.shipments.models import Delivery, Shipment, ShipmentItem
@@ -31,7 +31,7 @@ def create_shipment(
         status=status,
         total_weight_kg=total,
     )
-    ShipmentItem.objects.bulk_create(
+    ShipmentItemRepository(tenant).bulk_create(
         [
             ShipmentItem(
                 tenant=tenant,

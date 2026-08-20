@@ -1,43 +1,38 @@
 from datetime import timedelta
 from decimal import Decimal
 
-from django.core.management import call_command
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.dispatch.graph import run_dispatch
 from apps.dispatch.models import DispatchProposal
-from apps.dispatch.services import apply_proposal, approve, propose, reject
+from apps.dispatch.services import apply_proposal, approve, propose
 from apps.dispatch.solver import solve_wave
 from apps.events.consumers import consume_once
 from apps.events.outbox import publish_batch
-from apps.fleet.models import Driver, Vehicle, VehicleAssignment, VehicleType
-from apps.identity.models import Tenant
+from apps.fleet.models import Vehicle
 from apps.orders.services import confirm_order, create_order
-from apps.routing.models import Route
 from apps.shipments.services import create_shipment
-
-
-def _login(client, email="ops@acme-logistics.example", tenant="acme-logistics", password="password"):
-    res = client.post(
-        "/api/v1/auth/login",
-        {"email": email, "password": password, "tenant": tenant},
-        format="json",
-    )
-    assert res.status_code == 200, res.content
-    return res.data["access"]
+from helpers import (
+    acme_tenant,
+    drivers,
+    first_customer,
+    first_warehouse,
+    login,
+    proposals,
+    seed_bangalore,
+    vehicle_types,
+    vehicles,
+)
 
 
 def _seed():
-    call_command("seed_bangalore", reset=True)
-    return Tenant.objects.get(slug="acme-logistics")
+    seed_bangalore()
+    return acme_tenant()
 
 
 def _new_order(tenant, *, weight=40, temp=False, number="G-1"):
-    from apps.catalog.models import Customer, Warehouse
-
-    customer = Customer.objects.for_tenant(tenant).first()
-    warehouse = Warehouse.objects.for_tenant(tenant).first()
+    customer = first_customer(tenant)
+    warehouse = first_warehouse(tenant)
     item = {"sku": "X", "quantity": 1, "weight_kg": weight}
     if temp:
         item["temperature_min"] = 2
@@ -75,8 +70,8 @@ def test_propose_has_top_alternatives(db, memory_search):
 
 def test_hard_reject_over_weight(db, memory_search):
     tenant = _seed()
-    bike = VehicleType.objects.create(tenant=tenant, name="bike-g", max_weight_kg=Decimal("30"))
-    Vehicle.objects.for_tenant(tenant).update(vehicle_type=bike)
+    bike = vehicle_types(tenant).create(name="bike-g", max_weight_kg=Decimal("30"))
+    vehicles(tenant).tenant_qs().update(vehicle_type=bike)
     order = _new_order(tenant, weight=500, number="G-HEAVY")
     proposal = propose(tenant=tenant, order_id=order.id)
     assert proposal.hard_pass is False
@@ -85,7 +80,7 @@ def test_hard_reject_over_weight(db, memory_search):
 
 def test_hard_reject_missing_reefer(db, memory_search):
     tenant = _seed()
-    Driver.objects.for_tenant(tenant).update(skills=[])
+    drivers(tenant).tenant_qs().update(skills=[])
     order = _new_order(tenant, temp=True, number="G-COLD")
     proposal = propose(tenant=tenant, order_id=order.id)
     rejects = str((proposal.explanation or {}).get("rejects") or [])
@@ -115,7 +110,7 @@ def test_kafka_replay_does_not_double_propose(db, memory_bus, memory_search):
     publish_batch(bus=memory_bus, limit=200)
     consume_once("fleetiq-dispatch", bus=memory_bus, max_records=200)
     consume_once("fleetiq-dispatch", bus=memory_bus, max_records=200)
-    n = DispatchProposal.objects.for_tenant(tenant).filter(order=order).count()
+    n = proposals(tenant).tenant_qs().filter(order=order).count()
     assert n == 1
 
 
@@ -124,7 +119,7 @@ def test_apply_fails_if_vehicle_goes_maintenance(db, memory_search):
     order = _new_order(tenant, number="G-MAINT")
     proposal = propose(tenant=tenant, order_id=order.id)
     vid = proposal.chosen["vehicle_id"]
-    Vehicle.objects.filter(id=vid).update(status=Vehicle.Status.MAINTENANCE)
+    vehicles(tenant).tenant_qs().filter(id=vid).update(status=Vehicle.Status.MAINTENANCE)
     try:
         apply_proposal(proposal)
         assert False, "expected conflict"
@@ -150,7 +145,7 @@ def test_rest_dispatch_queue(db, memory_search):
     order = _new_order(tenant, number="G-REST")
     propose(tenant=tenant, order_id=order.id)
     client = APIClient()
-    token = _login(client)
+    token = login(client)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     res = client.get("/api/v1/dispatch/proposals/", {"status": "pending"})
     assert res.status_code == 200

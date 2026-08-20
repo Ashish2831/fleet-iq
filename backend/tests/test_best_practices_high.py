@@ -4,7 +4,8 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.api.rest.batch import _allowed, _normalize_path, batch
 from apps.common.errors import BadRequest
-from apps.identity.models import Role, Tenant, User, UserRole
+from apps.common.repositories import RoleRepository, TenantRepository, UserRoleRepository
+from helpers import users
 
 
 def test_batch_path_guards():
@@ -18,23 +19,22 @@ def test_batch_path_guards():
 
 @pytest.fixture
 def tenants(db):
-    a = Tenant.objects.create(name="Acme", slug="acme-batch")
-    b = Tenant.objects.create(name="Beta", slug="beta-batch")
+    a = TenantRepository().create(name="Acme", slug="acme-batch")
+    b = TenantRepository().create(name="Beta", slug="beta-batch")
     return a, b
 
 
 @pytest.mark.django_db
 def test_batch_get_me(tenants):
     tenant = tenants[0]
-    user = User.objects.create(
-        tenant=tenant,
+    user = users(tenant).create(
         email="batch@acme.test",
         full_name="Batch User",
         hashed_password=make_password("x"),
         is_active=True,
     )
-    role = Role.objects.create(tenant=tenant, name="ops_manager")
-    UserRole.objects.create(user=user, role=role)
+    role = RoleRepository(tenant).create(name="ops_manager")
+    UserRoleRepository(tenant).create(user=user, role=role)
     user._token_roles = ["ops_manager"]
     user._token_perms = []
 

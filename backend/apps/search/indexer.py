@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.utils import timezone
 
-from apps.common.repositories import DriverRepository, ShipmentRepository
+from apps.common.repositories import DriverRepository, ShipmentRepository, TenantRepository
 from apps.fleet.models import Driver
 from apps.search.chunk import chunk_markdown, load_sops
 from apps.search.documents import driver_document, shipment_document, shipments_for_order, shipments_for_route
@@ -61,9 +61,7 @@ def index_knowledge(tenant) -> int:
 
 def apply_search_event(env: dict) -> None:
     """Last-write-wins upsert from Kafka. No inbox table."""
-    from apps.identity.models import Tenant
-
-    tenant = Tenant.objects.filter(id=env.get("tenant_id")).first()
+    tenant = TenantRepository().by_id(env.get("tenant_id"))
     if tenant is None:
         return
     payload = env.get("payload") or {}

@@ -4,13 +4,13 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from apps.events.models import DailyEventCount
+from apps.common.repositories import DailyEventCountRepository
 
 
 def tenant_kpis(tenant, day=None) -> dict:
     """Yesterday's event projections. delayedDeliveries stays Core SQL."""
     day = day or (timezone.localdate() - timedelta(days=1))
-    rows = DailyEventCount.objects.for_tenant(tenant).filter(day=day)
+    rows = DailyEventCountRepository(tenant).for_day(day)
     by_type = {r.event_type: r.count for r in rows}
     completed = by_type.get("DeliveryCompleted", 0)
     failed = by_type.get("DeliveryFailed", 0)

@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from apps.common.models import OutboxEvent
 from apps.common.patterns.observer import DomainEvent, domain_events
+from apps.common.repositories import OutboxEventRepository
 from apps.events.bus import EventBus, get_bus
 from apps.events.envelopes import envelope, kafka_headers, topic_for
 
@@ -33,9 +34,8 @@ def enqueue(
         payload=payload,
         correlation_id=correlation_id,
     )
-    row = OutboxEvent.objects.create(
+    row = OutboxEventRepository(tenant).create(
         id=env["event_id"],
-        tenant=tenant,
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,
         event_type=event_type,
@@ -71,11 +71,7 @@ def publish_batch(*, limit: int = 100, bus: EventBus | None = None) -> dict:
     published = 0
     failed = 0
     with transaction.atomic():
-        rows = list(
-            OutboxEvent.objects.select_for_update(skip_locked=True)
-            .filter(published_at__isnull=True, attempts__lt=MAX_ATTEMPTS)
-            .order_by("created_at")[:limit]
-        )
+        rows = OutboxEventRepository.claim_unpublished(limit=limit, max_attempts=MAX_ATTEMPTS)
         for row in rows:
             topic = row.topic or topic_for(row.event_type)
             key = row.partition_key or str(row.aggregate_id)

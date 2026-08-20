@@ -5,13 +5,17 @@ from django.utils import timezone
 from apps.common.repositories import (
     DeliveryRepository,
     DriverRepository,
+    FuelTransactionRepository,
+    MaintenanceRecordRepository,
     RouteRepository,
+    RouteStopRepository,
     ShipmentRepository,
+    VehicleAssignmentRepository,
     VehicleRepository,
 )
 from apps.common.sanitize import sanitize_text
-from apps.fleet.models import Driver, FuelTransaction, MaintenanceRecord, VehicleAssignment
-from apps.routing.models import Route, RouteStop
+from apps.fleet.models import Driver
+from apps.routing.models import Route
 from apps.shipments.models import Delivery, Shipment
 
 
@@ -27,14 +31,14 @@ def routes_for_day(tenant, day):
         .prefetch_related(
             Prefetch(
                 "stops",
-                queryset=RouteStop.objects.select_related("address", "shipment").order_by("sequence"),
+                queryset=RouteStopRepository.prefetch_ordered(),
             )
         )
     )
 
 
 def available_drivers_without_vehicle(tenant):
-    current_asg = VehicleAssignment.objects.filter(driver_id=OuterRef("pk"), ends_at__isnull=True)
+    current_asg = VehicleAssignmentRepository.active_for_driver_subquery()
     return (
         DriverRepository(tenant)
         .qs()
@@ -45,11 +49,7 @@ def available_drivers_without_vehicle(tenant):
 
 
 def latest_fuel_cost_per_vehicle(tenant):
-    latest = (
-        FuelTransaction.objects.filter(vehicle_id=OuterRef("pk"))
-        .order_by("-occurred_at")
-        .values("cost")[:1]
-    )
+    latest = FuelTransactionRepository.subquery_latest_cost()
     return VehicleRepository(tenant).tenant_qs().annotate(latest_fuel_cost=Subquery(latest))
 
 
@@ -77,17 +77,12 @@ def delivery_counts(tenant, day=None, now=None):
 
 
 def last_n_maintenance_per_vehicle(tenant, n=3):
-    return (
-        MaintenanceRecord.objects.for_tenant(tenant)
-        .annotate(
-            rn=Window(
-                expression=RowNumber(),
-                partition_by=[F("vehicle_id")],
-                order_by=F("occurred_at").desc(),
-            )
-        )
-        .filter(rn__lte=n)
+    rn = Window(
+        expression=RowNumber(),
+        partition_by=[F("vehicle_id")],
+        order_by=F("occurred_at").desc(),
     )
+    return MaintenanceRecordRepository(tenant).ranked_per_vehicle(n=n, annotate_rn=rn)
 
 
 def delayed_shipments(tenant, now=None):

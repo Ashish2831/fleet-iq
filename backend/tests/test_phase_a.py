@@ -4,16 +4,6 @@ from decimal import Decimal
 import pytest
 from django.utils import timezone
 
-from apps.catalog.models import Address, Customer, Warehouse
-from apps.fleet.models import Driver, FuelTransaction, MaintenanceRecord, Vehicle, VehicleAssignment, VehicleType
-from apps.identity.models import Tenant
-from apps.orders.models import Order
-from apps.orders.services import create_order
-from apps.routing.models import Route
-from apps.routing.services import create_route_with_stops
-from apps.shipments.models import Delivery, Shipment
-from apps.shipments.services import create_shipment
-from apps.common.models import OutboxEvent
 from apps.common.queries import (
     available_drivers_without_vehicle,
     delayed_shipments,
@@ -24,41 +14,45 @@ from apps.common.queries import (
     vehicles_by_device_id,
     vehicles_on_in_progress_routes,
 )
+from apps.common.repositories import (
+    AddressRepository,
+    CustomerRepository,
+    FuelTransactionRepository,
+    MaintenanceRecordRepository,
+    TenantRepository,
+    VehicleAssignmentRepository,
+    WarehouseRepository,
+)
+from apps.orders.services import create_order
+from apps.routing.models import Route
+from apps.routing.services import create_route_with_stops
+from apps.shipments.models import Delivery, Shipment
+from apps.shipments.services import create_shipment
+from helpers import deliveries, drivers, orders, outbox, vehicle_types, vehicles
 
 
 @pytest.fixture
 def tenants(db):
-    a = Tenant.objects.create(name="Acme", slug="acme-test")
-    b = Tenant.objects.create(name="Beta", slug="beta-test")
+    a = TenantRepository().create(name="Acme", slug="acme-test")
+    b = TenantRepository().create(name="Beta", slug="beta-test")
     return a, b
 
 
 def _warehouse(tenant, suffix="1"):
-    addr = Address.objects.create(
-        tenant=tenant, line1="Hub", city="Bengaluru", lat=12.97, lng=77.59
-    )
-    return Warehouse.objects.create(
-        tenant=tenant, code=f"WH{suffix}", name="Hub", address=addr
-    )
+    addr = AddressRepository(tenant).create(line1="Hub", city="Bengaluru", lat=12.97, lng=77.59)
+    return WarehouseRepository(tenant).create(code=f"WH{suffix}", name="Hub", address=addr)
 
 
 def _customer(tenant, name="Cust"):
-    addr = Address.objects.create(
-        tenant=tenant, line1=name, city="Bengaluru", lat=12.93, lng=77.62
-    )
-    customer = Customer.objects.create(tenant=tenant, name=name)
+    addr = AddressRepository(tenant).create(line1=name, city="Bengaluru", lat=12.93, lng=77.62)
+    customer = CustomerRepository(tenant).create(name=name)
     return customer, addr
 
 
 def _vehicle_stack(tenant, plate="KA01XX0001"):
-    vtype = VehicleType.objects.create(
-        tenant=tenant, name=f"van-{plate}", max_weight_kg=Decimal("1000")
-    )
-    driver = Driver.objects.create(
-        tenant=tenant, employee_code=plate, full_name="Driver " + plate
-    )
-    vehicle = Vehicle.objects.create(
-        tenant=tenant,
+    vtype = vehicle_types(tenant).create(name=f"van-{plate}", max_weight_kg=Decimal("1000"))
+    driver = drivers(tenant).create(employee_code=plate, full_name="Driver " + plate)
+    vehicle = vehicles(tenant).create(
         vehicle_type=vtype,
         plate_number=plate,
         metadata={"device_id": f"IMEI-{plate}"},
@@ -87,10 +81,10 @@ def test_for_tenant_does_not_leak_orders(tenants):
         order_number="B-1",
         items=[{"sku": "S", "quantity": 1, "weight_kg": 1}],
     )
-    leaked = Order.objects.for_tenant(a).filter(order_number="B-1")
+    leaked = orders(a).qs().filter(order_number="B-1")
     assert leaked.count() == 0
-    assert Order.objects.for_tenant(a).count() == 1
-    assert Order.objects.for_tenant(b).count() == 1
+    assert orders(a).count() == 1
+    assert orders(b).count() == 1
 
 
 @pytest.mark.django_db
@@ -105,7 +99,7 @@ def test_create_order_writes_outbox_atomically(tenants):
         order_number="ACM-1",
         items=[{"sku": "COLD", "quantity": 2, "weight_kg": 5, "temperature_min": 2, "temperature_max": 8}],
     )
-    events = OutboxEvent.objects.for_tenant(a)
+    events = outbox(a).tenant_qs()
     assert events.count() == 1
     ev = events.get()
     assert ev.event_type == "OrderCreated"
@@ -120,9 +114,7 @@ def test_order_shipment_route_delivery_lifecycle(tenants):
     customer, dest = _customer(a)
     warehouse = _warehouse(a)
     driver, vehicle = _vehicle_stack(a)
-    VehicleAssignment.objects.create(
-        tenant=a, driver=driver, vehicle=vehicle, starts_at=timezone.now()
-    )
+    VehicleAssignmentRepository(a).create(driver=driver, vehicle=vehicle, starts_at=timezone.now())
     order = create_order(
         tenant=a,
         customer=customer,
@@ -167,7 +159,7 @@ def test_order_shipment_route_delivery_lifecycle(tenants):
         ],
     )
     assert route.stops.count() == 3
-    assert Delivery.objects.for_tenant(a).filter(shipment=shipment).count() == 1
+    assert deliveries(a).qs().filter(shipment=shipment).count() == 1
     assert route.assignment.driver_id == driver.id
     loaded = routes_for_day(a, timezone.localdate())
     assert loaded.get().assignment.vehicle_id == vehicle.id
@@ -182,16 +174,15 @@ def test_orm_exists_window_json_and_delay_queries(tenants):
     customer, dest = _customer(a)
     d1, v1 = _vehicle_stack(a, "KA01AA0001")
     d2, v2 = _vehicle_stack(a, "KA01AA0002")
-    VehicleAssignment.objects.create(tenant=a, driver=d1, vehicle=v1, starts_at=now)
-    FuelTransaction.objects.create(
-        tenant=a, vehicle=v1, occurred_at=now - timedelta(days=1), liters=10, cost=Decimal("100")
+    VehicleAssignmentRepository(a).create(driver=d1, vehicle=v1, starts_at=now)
+    FuelTransactionRepository(a).create(
+        vehicle=v1, occurred_at=now - timedelta(days=1), liters=10, cost=Decimal("100")
     )
-    FuelTransaction.objects.create(
-        tenant=a, vehicle=v1, occurred_at=now, liters=12, cost=Decimal("150")
+    FuelTransactionRepository(a).create(
+        vehicle=v1, occurred_at=now, liters=12, cost=Decimal("150")
     )
     for i in range(4):
-        MaintenanceRecord.objects.create(
-            tenant=a,
+        MaintenanceRecordRepository(a).create(
             vehicle=v1,
             kind="service",
             occurred_at=now - timedelta(days=i),

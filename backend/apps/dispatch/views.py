@@ -34,7 +34,7 @@ class DispatchProposalSerializer(serializers.ModelSerializer):
 class DispatchProposalViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsTenantAuthenticated, CanAssign]
     serializer_class = DispatchProposalSerializer
-    queryset = DispatchProposal.objects.select_related("order")
+    queryset = DispatchProposal.objects.none()
 
     def get_queryset(self):
         qs = DispatchProposalRepository(self.request.user.tenant).qs()

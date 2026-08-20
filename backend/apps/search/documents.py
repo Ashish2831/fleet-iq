@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from django.utils import timezone as dj_tz
 
 from apps.common.queries import delayed_shipments
-from apps.common.repositories import VehicleAssignmentRepository
+from apps.common.repositories import ShipmentRepository, VehicleAssignmentRepository
 from apps.fleet.models import Driver
 from apps.shipments.models import Shipment
 
@@ -109,20 +109,11 @@ def driver_document(driver: Driver, *, lat=None, lng=None) -> dict:
 
 
 def shipments_for_route(route_id) -> list[Shipment]:
-    # ID-keyed (no tenant in event payload path) — still goes through model manager.
-    return list(
-        Shipment.objects.filter(deliveries__route_stop__route_id=route_id)
-        .distinct()
-        .select_related("delivery_address", "warehouse")
-    )
+    return ShipmentRepository.by_route_id(route_id)
 
 
 def shipments_for_order(order_id) -> list[Shipment]:
-    return list(
-        Shipment.objects.filter(shipment_items__order_item__order_id=order_id)
-        .distinct()
-        .select_related("delivery_address", "warehouse")
-    )
+    return ShipmentRepository.by_order_id(order_id)
 
 
 def is_delayed_shipment(shipment: Shipment) -> bool:

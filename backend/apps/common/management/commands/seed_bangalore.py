@@ -5,23 +5,24 @@ from django.contrib.auth.hashers import make_password
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from apps.catalog.models import CustomerAddress
 from apps.common.repositories import (
     AddressRepository,
+    CustomerAddressRepository,
     CustomerRepository,
     DriverRepository,
+    FuelTransactionRepository,
+    MaintenanceRecordRepository,
+    PermissionRepository,
+    RoleRepository,
+    TenantRepository,
+    UserRepository,
+    UserRoleRepository,
+    VehicleAssignmentRepository,
     VehicleRepository,
+    VehicleTypeRepository,
     WarehouseRepository,
 )
-from apps.fleet.models import (
-    Driver,
-    FuelTransaction,
-    MaintenanceRecord,
-    Vehicle,
-    VehicleAssignment,
-    VehicleType,
-)
-from apps.identity.models import Permission, Role, Tenant, User, UserRole
+from apps.fleet.models import Driver, Vehicle
 from apps.orders.models import Order
 from apps.orders.services import create_order
 from apps.routing.models import Route
@@ -82,9 +83,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        tenants = TenantRepository()
         if options["reset"]:
-            Tenant.objects.filter(slug__in=[SLUG, "beta-freight"]).delete()
-        if Tenant.objects.filter(slug=SLUG).exists():
+            tenants.delete_by_slugs([SLUG, "beta-freight"])
+        if tenants.exists_slug(SLUG):
             self.stdout.write("Seed already present. Re-run with --reset.")
             return
         self._seed_acme()
@@ -92,7 +94,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Seeded acme-logistics and beta-freight."))
 
     def _seed_beta(self):
-        tenant = Tenant.objects.create(name="Beta Freight", slug="beta-freight", status="active")
+        tenant = TenantRepository().create(name="Beta Freight", slug="beta-freight", status="active")
         AddressRepository(tenant).create(
             line1="Secret other-tenant road",
             city="Mumbai",
@@ -103,12 +105,19 @@ class Command(BaseCommand):
     def _seed_acme(self):
         now = timezone.now()
         today = timezone.localdate()
-        tenant = Tenant.objects.create(name="Acme Logistics", slug=SLUG, status="active")
+        tenant = TenantRepository().create(name="Acme Logistics", slug=SLUG, status="active")
         addresses_repo = AddressRepository(tenant)
         warehouses_repo = WarehouseRepository(tenant)
         customers_repo = CustomerRepository(tenant)
         vehicles_repo = VehicleRepository(tenant)
         drivers_repo = DriverRepository(tenant)
+        vehicle_types = VehicleTypeRepository(tenant)
+        assignments = VehicleAssignmentRepository(tenant)
+        maintenance = MaintenanceRecordRepository(tenant)
+        fuel = FuelTransactionRepository(tenant)
+        perms_repo = PermissionRepository()
+        roles_repo = RoleRepository(tenant)
+        users_repo = UserRepository(tenant)
 
         perm_codes = [
             "orders.order.create",
@@ -118,21 +127,23 @@ class Command(BaseCommand):
             "dispatch.route.assign",
             "ai.run.create",
         ]
-        perms = {c: Permission.objects.get_or_create(codename=c, defaults={"description": c})[0] for c in perm_codes}
+        perms = {
+            c: perms_repo.get_or_create(codename=c, defaults={"description": c})[0]
+            for c in perm_codes
+        }
 
         roles = {}
         for name in ("owner", "ops_manager", "dispatcher", "driver", "viewer"):
-            role = Role.objects.create(tenant=tenant, name=name)
+            role = roles_repo.create(name=name)
             role.permissions.add(*perms.values())
             roles[name] = role
 
-        owner = User.objects.create(
-            tenant=tenant,
+        owner = users_repo.create(
             email="ops@acme-logistics.example",
             full_name="Acme Ops",
             hashed_password=make_password("password"),
         )
-        UserRole.objects.create(user=owner, role=roles["ops_manager"])
+        UserRoleRepository(tenant).create(user=owner, role=roles["ops_manager"])
 
         addresses = [
             addresses_repo.create(
@@ -153,6 +164,7 @@ class Command(BaseCommand):
         )
 
         customers = []
+        cust_addrs = CustomerAddressRepository(tenant)
         for i, name in enumerate(CUSTOMER_NAMES):
             addr = addresses[2 + i]
             customer = customers_repo.create(
@@ -160,8 +172,7 @@ class Command(BaseCommand):
                 email=f"ops{i}@customer.example",
                 phone=f"+91980000000{i}",
             )
-            CustomerAddress.objects.create(
-                tenant=tenant,
+            cust_addrs.create(
                 customer=customer,
                 address=addr,
                 label="delivery",
@@ -169,17 +180,16 @@ class Command(BaseCommand):
             )
             customers.append((customer, addr))
 
-        van = VehicleType.objects.create(
-            tenant=tenant, name="van", max_weight_kg=Decimal("1200"), requires_skills=[]
+        van = vehicle_types.create(
+            name="van", max_weight_kg=Decimal("1200"), requires_skills=[]
         )
-        reefer = VehicleType.objects.create(
-            tenant=tenant,
+        reefer = vehicle_types.create(
             name="reefer",
             max_weight_kg=Decimal("800"),
             requires_skills=["reefer"],
         )
-        bike = VehicleType.objects.create(
-            tenant=tenant, name="bike", max_weight_kg=Decimal("30"), requires_skills=[]
+        bike = vehicle_types.create(
+            name="bike", max_weight_kg=Decimal("30"), requires_skills=[]
         )
 
         types_cycle = [van, van, van, van, van, reefer, reefer, reefer, bike, bike]
@@ -216,8 +226,7 @@ class Command(BaseCommand):
             )
 
         for i in range(10):
-            VehicleAssignment.objects.create(
-                tenant=tenant,
+            assignments.create(
                 driver=drivers[i],
                 vehicle=vehicles[i],
                 starts_at=now - timedelta(days=3),
@@ -225,16 +234,14 @@ class Command(BaseCommand):
 
         for v in vehicles[:3]:
             for n in range(4):
-                MaintenanceRecord.objects.create(
-                    tenant=tenant,
+                maintenance.create(
                     vehicle=v,
                     kind="service" if n % 2 == 0 else "inspection",
                     occurred_at=now - timedelta(days=30 * (n + 1)),
                     odometer_km=Decimal(str(8000 + n * 1000)),
                     cost=Decimal("2500.00"),
                 )
-            FuelTransaction.objects.create(
-                tenant=tenant,
+            fuel.create(
                 vehicle=v,
                 driver=drivers[0],
                 occurred_at=now - timedelta(days=2),

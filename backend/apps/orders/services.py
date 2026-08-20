@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 
 from apps.common.errors import Conflict, NotFound
-from apps.common.repositories import OrderRepository
+from apps.common.repositories import OrderItemRepository, OrderRepository
 from apps.common.sanitize import sanitize_text
 from apps.events.outbox import enqueue
 from apps.orders.models import Order, OrderItem
@@ -72,7 +72,7 @@ def create_order(
         status=status,
         total_weight_kg=total,
     )
-    OrderItem.objects.bulk_create(
+    OrderItemRepository(tenant).bulk_create(
         [
             OrderItem(
                 tenant=tenant,

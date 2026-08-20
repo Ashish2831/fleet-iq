@@ -1,8 +1,6 @@
 import json
 from datetime import timedelta
 
-from django.contrib.auth.hashers import make_password
-from django.core.management import call_command
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -10,33 +8,31 @@ from rest_framework.test import APIClient
 from apps.api.authentication import user_from_access
 from apps.api.federation import execute_federated
 from apps.api.graphql.loaders import Loaders
-from apps.catalog.models import Customer, Warehouse
 from apps.dispatch.models import DispatchProposal
 from apps.dispatch.services import propose
-from apps.events.models import DailyEventCount
-from apps.identity.models import Role, Tenant, User, UserRole
-from apps.orders.models import Order
 from config.schema import GraphQLContext
-
-
-def _login(client, email="ops@acme-logistics.example", tenant="acme-logistics", password="password"):
-    res = client.post(
-        "/api/v1/auth/login",
-        {"email": email, "password": password, "tenant": tenant},
-        format="json",
-    )
-    assert res.status_code == 200, res.content
-    return res.data["access"]
+from helpers import (
+    acme_tenant,
+    beta_tenant,
+    daily_counts,
+    first_customer,
+    first_order,
+    first_vehicle,
+    first_warehouse,
+    login,
+    make_ops_user,
+    seed_bangalore,
+)
 
 
 def _seed():
-    call_command("seed_bangalore", reset=True)
-    return Tenant.objects.get(slug="acme-logistics")
+    seed_bangalore()
+    return acme_tenant()
 
 
 def _auth(**kwargs):
     client = APIClient()
-    token = _login(client, **kwargs)
+    token = login(client, **kwargs)
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
     return client, token
 
@@ -44,8 +40,8 @@ def _auth(**kwargs):
 @override_settings(ROOT_URLCONF="config.urls_core")
 def test_core_accepts_orders_without_tracking_routes(db):
     tenant = _seed()
-    customer = Customer.objects.for_tenant(tenant).first()
-    warehouse = Warehouse.objects.for_tenant(tenant).first()
+    customer = first_customer(tenant)
+    warehouse = first_warehouse(tenant)
     client, _ = _auth()
     missing = client.post(
         "/api/v1/tracking/locations",
@@ -93,20 +89,13 @@ def test_tracking_service_jwt_and_live_snapshot(db, fake_redis):
 def test_analytics_kpis_are_tenant_scoped(db):
     tenant = _seed()
     yesterday = timezone.localdate() - timedelta(days=1)
-    DailyEventCount.objects.create(tenant=tenant, day=yesterday, event_type="OrderCreated", count=4)
+    daily_counts(tenant).create(day=yesterday, event_type="OrderCreated", count=4)
     client, _ = _auth()
     res = client.get("/api/v1/analytics/kpis")
     assert res.status_code == 200, res.content
     assert res.data["orders_yesterday"] == 4
-    beta = Tenant.objects.get(slug="beta-freight")
-    user = User.objects.create(
-        tenant=beta,
-        email="ops@beta.example",
-        full_name="Beta Ops",
-        hashed_password=make_password("password"),
-    )
-    role = Role.objects.create(tenant=beta, name="ops_manager")
-    UserRole.objects.create(user=user, role=role)
+    beta = beta_tenant()
+    make_ops_user(beta, email="ops@beta.example", full_name="Beta Ops")
     other, _ = _auth(email="ops@beta.example", tenant="beta-freight")
     empty = other.get("/api/v1/analytics/kpis")
     assert empty.status_code == 200
@@ -219,9 +208,7 @@ def test_core_dashboard_has_no_live_counts(db):
 @override_settings(ROOT_URLCONF="config.urls_core")
 def test_core_vehicle_has_no_live_field(db):
     tenant = _seed()
-    from apps.fleet.models import Vehicle
-
-    vehicle = Vehicle.objects.for_tenant(tenant).first()
+    vehicle = first_vehicle(tenant)
     client, _ = _auth()
     res = client.post(
         "/graphql",
@@ -283,7 +270,7 @@ def test_gateway_http_calls_subgraph(db, monkeypatch):
 
 def test_dispatch_proposal_still_core(db, memory_search):
     tenant = _seed()
-    order = Order.objects.for_tenant(tenant).first()
+    order = first_order(tenant)
     proposal = propose(tenant=tenant, order_id=order.id)
     assert proposal.status == DispatchProposal.Status.PENDING
     client, _ = _auth()

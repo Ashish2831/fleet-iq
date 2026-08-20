@@ -4,7 +4,7 @@ import uuid
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from apps.identity.models import Tenant, User
+from apps.common.repositories import RouteRepository, TenantRepository, UserRepository
 from apps.routing.models import Route
 from apps.tracking.geo import interpolate
 from apps.tracking.services import ingest_location
@@ -21,12 +21,15 @@ class Command(BaseCommand):
         parser.add_argument("--once", action="store_true")
 
     def handle(self, *args, **opts):
-        tenant = Tenant.objects.get(slug=opts["tenant"])
-        user = User.objects.filter(tenant=tenant, email="ops@acme-logistics.example").first()
-        if not user:
-            user = User.objects.filter(tenant=tenant).first()
+        tenant = TenantRepository().by_slug(opts["tenant"])
+        if not tenant:
+            self.stderr.write(f"Unknown tenant {opts['tenant']}")
+            return
+        users = UserRepository(tenant)
+        user = users.by_email("ops@acme-logistics.example", active_only=False) or users.first()
         routes = list(
-            Route.objects.for_tenant(tenant)
+            RouteRepository(tenant)
+            .tenant_qs()
             .filter(status=Route.Status.IN_PROGRESS)
             .select_related("assignment__vehicle")
             .prefetch_related("stops__address")
