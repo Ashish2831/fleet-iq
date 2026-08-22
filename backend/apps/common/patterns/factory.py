@@ -64,6 +64,12 @@ class ServiceFactory:
         return get_bus()
 
     @staticmethod
+    def session_storage():
+        from apps.common.patterns.session import default_session_storage
+
+        return default_session_storage()
+
+    @staticmethod
     def rate_limit_store(*, prefer_cache: bool = True) -> RateLimitStore:
         if prefer_cache:
             try:

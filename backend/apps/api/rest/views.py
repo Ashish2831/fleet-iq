@@ -31,8 +31,10 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from apps.catalog.models import Customer, Warehouse
+from apps.catalog.services import create_customer, create_warehouse
 from apps.common.errors import BadRequest, NotFound, Unauthorized
 from apps.common.patterns.io_formats import get_export_strategy
+from apps.common.patterns.session import default_session_storage
 from apps.common.queries import delayed_shipments
 from apps.common.repositories import (
     CustomerRepository,
@@ -47,12 +49,14 @@ from apps.common.repositories import (
     WarehouseRepository,
 )
 from apps.fleet.models import Driver, Vehicle
+from apps.fleet.services import create_driver, create_vehicle
+from apps.identity.services import update_profile
 from apps.orders.models import Order
 from apps.orders.services import confirm_order, create_order
 from apps.routing.models import Route
-from apps.routing.services import assign_route
+from apps.routing.services import assign_route, create_draft_route
 from apps.shipments.models import Delivery, Shipment
-from apps.shipments.services import complete_delivery
+from apps.shipments.services import complete_delivery, create_draft_shipment
 from apps.telemetry.queries import vehicle_track
 
 
@@ -101,7 +105,11 @@ def login(request):
         raise Unauthorized("Invalid credentials")
     access = jwt_mod.access_token(user)
     refresh = jwt_mod.refresh_token(user)
-    response = Response({"access": access, "user": MeSerializer(user).data})
+    session_id = default_session_storage().create(
+        {"user_id": str(user.id), "tenant_id": str(user.tenant_id), "email": user.email},
+        ttl_seconds=60 * 60 * 24 * 7,
+    )
+    response = Response({"access": access, "user": MeSerializer(user).data, "session_id": session_id})
     return _set_refresh_cookie(response, refresh)
 
 
@@ -122,12 +130,9 @@ def refresh(request):
 @permission_classes([IsTenantAuthenticated])
 def me(request):
     if request.method == "PATCH":
-        from apps.common.sanitize import sanitize_text
-
         name = request.data.get("full_name")
         if name:
-            request.user.full_name = sanitize_text(name, max_len=120)
-            request.user.save(update_fields=["full_name", "updated_at"])
+            update_profile(user=request.user, full_name=name)
     return Response(MeSerializer(request.user).data)
 
 
@@ -151,6 +156,9 @@ class DriverViewSet(TenantViewSet):
     def get_queryset(self):
         return DriverRepository(self.request.user.tenant).qs()
 
+    def perform_create(self, serializer):
+        serializer.instance = create_driver(tenant=self.request.user.tenant, **serializer.validated_data)
+
 
 class VehicleViewSet(TenantViewSet):
     queryset = Vehicle.objects.none()
@@ -159,6 +167,9 @@ class VehicleViewSet(TenantViewSet):
 
     def get_queryset(self):
         return VehicleRepository(self.request.user.tenant).qs()
+
+    def perform_create(self, serializer):
+        serializer.instance = create_vehicle(tenant=self.request.user.tenant, **serializer.validated_data)
 
     @action(detail=True, methods=["get"])
     def track(self, request, pk=None):
@@ -204,13 +215,14 @@ class WarehouseViewSet(TenantViewSet):
         return WarehouseRepository(self.request.user.tenant).qs()
 
     def perform_create(self, serializer):
-        from apps.common.repositories import AddressRepository
-
-        tenant = self.request.user.tenant
-        address = AddressRepository(tenant).get(serializer.validated_data.pop("address_id"))
-        if not address:
-            raise NotFound("Address not found")
-        serializer.save(tenant=tenant, address=address)
+        data = serializer.validated_data
+        serializer.instance = create_warehouse(
+            tenant=self.request.user.tenant,
+            code=data["code"],
+            name=data["name"],
+            address_id=data.pop("address_id"),
+            status=data.get("status"),
+        )
 
 
 class CustomerViewSet(TenantViewSet):
@@ -220,6 +232,9 @@ class CustomerViewSet(TenantViewSet):
 
     def get_queryset(self):
         return CustomerRepository(self.request.user.tenant).qs().filter(deleted_at__isnull=True)
+
+    def perform_create(self, serializer):
+        serializer.instance = create_customer(tenant=self.request.user.tenant, **serializer.validated_data)
 
 
 class OrderViewSet(TenantViewSet):
@@ -301,7 +316,7 @@ class ShipmentViewSet(TenantViewSet):
         return ShipmentRepository(self.request.user.tenant).qs()
 
     def perform_create(self, serializer):
-        serializer.save(tenant=self.request.user.tenant)
+        serializer.instance = create_draft_shipment(tenant=self.request.user.tenant, **serializer.validated_data)
 
 
 class RouteViewSet(TenantViewSet):
@@ -313,7 +328,7 @@ class RouteViewSet(TenantViewSet):
         return RouteRepository(self.request.user.tenant).qs()
 
     def perform_create(self, serializer):
-        serializer.save(tenant=self.request.user.tenant)
+        serializer.instance = create_draft_route(tenant=self.request.user.tenant, **serializer.validated_data)
 
     @action(detail=True, methods=["post"], permission_classes=[IsTenantAuthenticated, CanAssign])
     def assign(self, request, pk=None):

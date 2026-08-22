@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 
 from apps.common.errors import Conflict, NotFound
+from apps.common.patterns.validation import StrictValidationStrategy, ValidationStrategy, validate_required
 from apps.common.repositories import OrderItemRepository, OrderRepository
 from apps.common.sanitize import sanitize_text
 from apps.events.outbox import enqueue
@@ -59,7 +60,15 @@ def create_order(
     priority: int = 0,
     notes: str = "",
     status: str = Order.Status.CREATED,
+    validation: ValidationStrategy | None = None,
 ) -> Order:
+    checked = validate_required(
+        {"order_number": order_number, "items": items or None},
+        ["order_number", "items"],
+        strategy=validation or StrictValidationStrategy(),
+    )
+    if not checked.ok:
+        raise Conflict("; ".join(checked.errors))
     total = sum((Decimal(str(i["weight_kg"])) * Decimal(str(i["quantity"])) for i in items), Decimal("0"))
     repo = OrderRepository(tenant)
     order = repo.create(

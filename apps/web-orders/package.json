@@ -7,6 +7,7 @@
     "start": "next start --port 3002"
   },
   "dependencies": {
+    "@fleetiq/gql-client": "file:../../packages/gql-client",
     "@fleetiq/sanitize": "file:../../packages/sanitize",
     "next": "^15.5.0",
     "react": "^19.1.0",

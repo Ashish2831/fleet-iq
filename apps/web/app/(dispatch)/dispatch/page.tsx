@@ -1,23 +1,18 @@
 "use client";
 
-import { useEffect, useOptimistic, useState, useTransition } from "react";
-import { rest, sanitizeText } from "@/lib/api";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useOptimistic, useState, useTransition } from "react";
 
-type Proposal = {
-  id: string;
-  order_number: string;
-  status: string;
-  score: number | null;
-  hard_pass: boolean;
-  chosen: { driver_name?: string; vehicle_plate?: string; cost?: number; features?: Record<string, number> };
-  alternatives: { driver_name?: string; cost?: number }[];
-  explanation: { rejects?: unknown[] };
-};
+import { useDispatchQueueQuery } from "@/lib/queries";
+import { sanitizeText } from "@/lib/sanitize";
+import { DispatchService, type DispatchProposal } from "@/lib/services";
 
 type OptimisticAction = { id: string; status: "approved" | "rejected" };
 
 export default function DispatchPage() {
-  const [rows, setRows] = useState<Proposal[]>([]);
+  const query = useDispatchQueueQuery();
+  const rows = query.data ?? [];
+  const queryClient = useQueryClient();
   const [err, setErr] = useState("");
   const [isPending, startTransition] = useTransition();
   const [optimisticRows, applyOptimistic] = useOptimistic(
@@ -26,23 +21,10 @@ export default function DispatchPage() {
       current.map((p) => (p.id === action.id ? { ...p, status: action.status } : p)),
   );
 
-  async function load() {
-    try {
-      const data = await rest<{ results?: Proposal[] } | Proposal[]>(
-        "/api/v1/dispatch/proposals/?status=pending",
-      );
-      setRows(Array.isArray(data) ? data : data.results || []);
-      setErr("");
-    } catch (e: unknown) {
-      setErr(sanitizeText(e instanceof Error ? e.message : "Load failed", 200));
-    }
-  }
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 4000);
-    return () => clearInterval(t);
-  }, []);
+  const mutation = useMutation({
+    mutationFn: ({ id, verb }: { id: string; verb: "approve" | "reject" }) => DispatchService.act(id, verb),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["dispatch-pending"] }),
+  });
 
   function act(id: string, verb: "approve" | "reject") {
     setErr("");
@@ -50,16 +32,14 @@ export default function DispatchPage() {
     startTransition(async () => {
       applyOptimistic({ id, status: nextStatus });
       try {
-        await rest(`/api/v1/dispatch/proposals/${id}/${verb}/`, { method: "POST", dedupe: false });
-        await load();
+        await mutation.mutateAsync({ id, verb });
       } catch (e: unknown) {
         setErr(sanitizeText(e instanceof Error ? e.message : "Action failed", 200));
-        await load();
       }
     });
   }
 
-  const visible = optimisticRows.filter((p) => p.status === "pending");
+  const visible = (optimisticRows as DispatchProposal[]).filter((p) => p.status === "pending");
 
   return (
     <>
@@ -69,6 +49,7 @@ export default function DispatchPage() {
         {isPending ? " Updating…" : ""}
       </p>
       {err ? <p className="err">{err}</p> : null}
+      {query.error ? <p className="err">{sanitizeText(query.error.message, 200)}</p> : null}
       <table>
         <thead>
           <tr>

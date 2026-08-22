@@ -6,14 +6,25 @@ Multi-tenant logistics / fleet intelligence. Architecture: `docs/architecture/`.
 
 ## Run
 
+One-shot (Docker infra + migrate + Bangalore seed + search index):
+
 ```bash
-docker compose up -d postgres redis redpanda console mongo elasticsearch
+chmod +x scripts/*.sh
+make setup
+make run          # another terminal: Django / Daphne
+make web          # another terminal: Next.js on :3000
+```
+
+Or step by step:
+
+```bash
+make up
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r ../requirements.txt
 cp .env.example .env
 python manage.py migrate
-python manage.py seed_bangalore
+python manage.py seed_bangalore --reset
 python manage.py ensure_topics
 python manage.py ensure_mongo
 python manage.py reindex_search
@@ -43,12 +54,14 @@ npm install
 npm run dev
 ```
 
-GPS demo:
+GPS demo (`make gps` or):
 
 ```bash
 cd backend && source .venv/bin/activate
 python manage.py simulate_gps --tenant acme-logistics --interval 1
 ```
+
+Optional Kafka workers (`make workers`): set `KAFKA_ENABLED=true` (and `MONGO_ENABLED` / `ES_ENABLED` as needed) in `backend/.env`.
 
 - API: http://127.0.0.1:8000/api/v1/docs/ · GraphQL: http://127.0.0.1:8000/graphql
 - UI: http://localhost:3000  login `acme-logistics` / `ops@acme-logistics.example` / `password`

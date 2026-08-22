@@ -19,6 +19,12 @@ from apps.shipments.models import Delivery
 from apps.tracking import redis_state as rs
 
 
+def create_draft_route(*, tenant, **data):
+    if "route_number" in data:
+        data["route_number"] = sanitize_text(str(data["route_number"]), max_len=64)
+    return RouteRepository(tenant).create(**data)
+
+
 @transaction.atomic
 def create_route_with_stops(
     *,

@@ -83,3 +83,63 @@ def test_csv_json_export_import_roundtrip():
     assert parsed[0]["order_number"] == "A-1"
     json_bytes = get_export_strategy("json").export(rows)
     assert get_import_strategy("json").parse(json_bytes)[1]["status"] == "confirmed"
+
+
+def test_session_memory_roundtrip():
+    from apps.common.patterns.session import MemorySessionStorage
+
+    store = MemorySessionStorage()
+    sid = store.create({"user_id": "u1"})
+    assert store.get(sid)["user_id"] == "u1"
+    store.delete(sid)
+    assert store.get(sid) is None
+
+
+def test_validation_strict_and_lenient():
+    from apps.common.patterns.validation import LenientValidationStrategy, StrictValidationStrategy, validate_required
+
+    strict = validate_required({"a": ""}, ["a"], StrictValidationStrategy())
+    assert strict.ok is False
+    lenient = validate_required({"a": ""}, ["a"], LenientValidationStrategy())
+    assert lenient.ok is True
+    assert lenient.warnings
+
+
+def test_ttl_cache_decorator():
+    from apps.common.patterns.decorator import with_ttl_cache
+
+    n = {"c": 0}
+
+    @with_ttl_cache(ttl_seconds=60)
+    def compute():
+        n["c"] += 1
+        return n["c"]
+
+    assert compute() == 1
+    assert compute() == 1
+
+
+def test_pipeline_chain_requires_bearer():
+    from apps.common.patterns.chain import AuthRequiredHandler, PipelineRequest, run_chain
+
+    req = PipelineRequest(path="/graphql", method="POST", headers={})
+    try:
+        run_chain([AuthRequiredHandler()], req, lambda: "ok")
+        assert False, "expected PermissionError"
+    except PermissionError:
+        pass
+    req.headers["Authorization"] = "Bearer x"
+    assert run_chain([AuthRequiredHandler()], req, lambda: "ok") == "ok"
+
+
+def test_fleet_adapters_camel_vs_snake(db):
+    from helpers import acme_tenant, first_vehicle, seed_bangalore
+    from apps.common.patterns.adapter import GraphQLFleetAdapter, RestFleetAdapter
+
+    seed_bangalore()
+    tenant = acme_tenant()
+    assert first_vehicle(tenant)
+    rest_rows = RestFleetAdapter(tenant).list_vehicles(limit=1)
+    gql_rows = GraphQLFleetAdapter(tenant).list_vehicles(limit=1)
+    assert "plate_number" in rest_rows[0]
+    assert "plateNumber" in gql_rows[0]

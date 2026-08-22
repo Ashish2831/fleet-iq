@@ -1008,6 +1008,23 @@ class Query(IdentityQuery, DashboardQuery, FleetQuery, OrderQuery, RoutingQuery,
 @strawberry.type
 class CoreMutation:
     @strawberry.mutation
+    async def update_me(self, info: strawberry.Info, full_name: str) -> UserType:
+        def inner():
+            user = _user(info)
+            from apps.identity.services import update_profile
+
+            user = update_profile(user=user, full_name=full_name)
+            return UserType(
+                id=str(user.id),
+                email=user.email,
+                full_name=user.full_name,
+                tenant_slug=user.tenant.slug,
+                roles=list(_roles(user)),
+            )
+
+        return await sync_to_async(inner)()
+
+    @strawberry.mutation
     async def confirm_order(self, info: strawberry.Info, id: strawberry.ID) -> OrderType:
         def inner():
             user = _user(info)

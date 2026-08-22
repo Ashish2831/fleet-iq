@@ -1,31 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { gql, sanitizeText } from "@/lib/api";
-
-type Driver = {
-  id: string;
-  employeeCode: string;
-  fullName: string;
-  status: string;
-  skills: string[];
-  rating?: number | null;
-};
+import { useDriversQuery } from "@/lib/queries";
+import { sanitizeText } from "@/lib/sanitize";
 
 export default function DriversPage() {
-  const [rows, setRows] = useState<Driver[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    gql<{ drivers: Driver[] }>(`query { drivers { id employeeCode fullName status skills rating } }`)
-      .then((d) => setRows(d.drivers))
-      .catch((e) => setError(sanitizeText(e instanceof Error ? e.message : "Failed", 200)));
-  }, []);
+  const { data: rows = [], error } = useDriversQuery();
   return (
     <>
       <h2>Drivers</h2>
-      {error ? <p className="err">{error}</p> : null}
+      {error ? <p className="err">{sanitizeText(error.message, 200)}</p> : null}
       <table>
-        <thead><tr><th>Code</th><th>Name</th><th>Status</th><th>Skills</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Skills</th>
+          </tr>
+        </thead>
         <tbody>
           {rows.map((d) => (
             <tr key={d.id}>

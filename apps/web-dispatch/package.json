@@ -3,6 +3,7 @@
   "private": true,
   "scripts": { "dev": "next dev --port 3003" },
   "dependencies": {
+    "@fleetiq/gql-client": "file:../../packages/gql-client",
     "@fleetiq/sanitize": "file:../../packages/sanitize",
     "next": "^15.5.0",
     "react": "^19.1.0",

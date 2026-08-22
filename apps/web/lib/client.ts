@@ -1,6 +1,7 @@
 /** FleetIQ API client — interceptors, dedup, batch, shared errors. */
 
 import { clearToken, getToken, setToken } from "./auth";
+import { httpCache } from "./cache";
 import { sanitizeText } from "./sanitize";
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
@@ -28,6 +29,10 @@ export type RequestOptions = RequestInit & {
   dedupe?: boolean;
   /** Skip JSON Content-Type */
   raw?: boolean;
+  /** Skip HTTP response cache (GET/GQL) */
+  useHttpCache?: boolean;
+  /** Cache TTL ms (default 30s) */
+  cacheTtlMs?: number;
 };
 
 type RequestInterceptor = (path: string, options: RequestOptions) => RequestOptions | Promise<RequestOptions>;
@@ -71,6 +76,13 @@ export class ApiClient {
       }
       return { ...options, headers };
     });
+
+    this.addResponseInterceptor((response) => {
+      const cc = response.headers.get("Cache-Control") || "";
+      if (/no-store|no-cache/i.test(cc)) {
+        httpCache.invalidate(response.url || "");
+      }
+    });
   }
 
   addRequestInterceptor(fn: RequestInterceptor) {
@@ -84,7 +96,13 @@ export class ApiClient {
   async rest<T>(path: string, init: RequestOptions = {}): Promise<T> {
     const method = (init.method || "GET").toUpperCase();
     const dedupe = init.dedupe !== false && method === "GET";
-    const key = `${method}:${path}:${typeof init.body === "string" ? init.body : ""}`;
+    const key = httpCache.key(method, path, init.body ?? null);
+    const useCache = init.useHttpCache !== false && method === "GET";
+
+    if (useCache) {
+      const cached = httpCache.get(key);
+      if (cached !== undefined) return cached as T;
+    }
 
     const exec = async () => {
       let options: RequestOptions = { ...init, method };
@@ -108,6 +126,8 @@ export class ApiClient {
           },
         );
       }
+      if (useCache) httpCache.set(key, data, init.cacheTtlMs ?? 30_000);
+      if (method !== "GET") httpCache.invalidate("/api/v1/");
       return data as T;
     };
 
@@ -116,6 +136,11 @@ export class ApiClient {
 
   async gql<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
     const key = `GQL:${query}:${JSON.stringify(variables ?? {})}`;
+    const isMutation = /^\s*mutation\b/i.test(query);
+    if (!isMutation) {
+      const cached = httpCache.get(key);
+      if (cached !== undefined) return cached as T;
+    }
     return this.deduper.run(key, async () => {
       let options: RequestOptions = {
         method: "POST",
@@ -135,6 +160,8 @@ export class ApiClient {
           body,
         });
       }
+      if (isMutation) httpCache.invalidate("GQL:");
+      else httpCache.set(key, body.data, 30_000);
       return body.data as T;
     });
   }

@@ -45,6 +45,12 @@ def create_shipment(
     return shipment
 
 
+def create_draft_shipment(*, tenant, **data):
+    if "shipment_number" in data:
+        data["shipment_number"] = sanitize_text(str(data["shipment_number"]), max_len=64)
+    return ShipmentRepository(tenant).create(**data)
+
+
 @transaction.atomic
 def complete_delivery(*, tenant, delivery_id, failed: bool = False, reason: str = "") -> Delivery:
     delivery = DeliveryRepository(tenant).for_update(delivery_id)

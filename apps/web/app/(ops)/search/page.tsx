@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { gql, sanitizeText, useDeferredQuery } from "@/lib/api";
+import { sanitizeText, useDeferredQuery } from "@/lib/api";
+import { SearchService } from "@/lib/services";
 
 type ShipHit = {
   shipmentNumber: string;
@@ -26,19 +27,7 @@ export default function SearchPage() {
   async function run() {
     setErr("");
     try {
-      const data = await gql<{
-        searchShipments: { hits: ShipHit[]; facetsWarehouse: string[] };
-        searchKnowledge: KnowHit[];
-      }>(
-        `query($q: String, $delayed: Boolean) {
-          searchShipments(q: $q, delayed: $delayed, city: "Bengaluru") {
-            hits { shipmentNumber status delayed city warehouseCode customerName score }
-            facetsWarehouse
-          }
-          searchKnowledge(q: $q) { text title source score heading }
-        }`,
-        { q: deferredQuery || q, delayed },
-      );
+      const data = await SearchService.run(deferredQuery || q, delayed);
       setShips(data.searchShipments.hits);
       setFacets(data.searchShipments.facetsWarehouse);
       setKnowledge(data.searchKnowledge);

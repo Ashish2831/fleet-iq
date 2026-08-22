@@ -1,24 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { gql, sanitizeText } from "@/lib/api";
-
-type Shipment = { id: string; shipmentNumber: string; status: string; promisedAt?: string | null };
+import { useShipmentsQuery } from "@/lib/queries";
+import { sanitizeText } from "@/lib/sanitize";
 
 export default function ShipmentsPage() {
-  const [rows, setRows] = useState<Shipment[]>([]);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    gql<{ shipments: Shipment[] }>(`query { shipments { id shipmentNumber status promisedAt } }`)
-      .then((d) => setRows(d.shipments))
-      .catch((e) => setError(sanitizeText(e instanceof Error ? e.message : "Failed", 200)));
-  }, []);
+  const { data: rows = [], error } = useShipmentsQuery();
   return (
     <>
       <h2>Shipments</h2>
-      {error ? <p className="err">{error}</p> : null}
+      {error ? <p className="err">{sanitizeText(error.message, 200)}</p> : null}
       <table>
-        <thead><tr><th>Number</th><th>Status</th><th>Promised</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Number</th>
+            <th>Status</th>
+            <th>Promised</th>
+          </tr>
+        </thead>
         <tbody>
           {rows.map((s) => (
             <tr key={s.id}>
